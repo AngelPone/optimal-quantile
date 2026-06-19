@@ -1,0 +1,28 @@
+[project]
+name = "optimal-quantile"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "cvxpy>=1.9.1",
+    "forecopy>=0.1.1",
+    "matplotlib>=3.11.0",
+    "numpy>=2.4.6",
+    "pandas>=2.3.3",
+    "pytask>=0.6.0",
+    "scipy>=1.17.1",
+    "sstudentt>=0.1.1",
+    "statsforecast>=2.0.1",
+    "torch>=2.12.0",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytask.ini_options]
+paths = [ "src/simulation" ]
