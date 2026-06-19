@@ -81,5 +81,11 @@ for scenario in SCENARIOS:
                 optimizer_cls=Adam,
                 optimizer_kwargs={"lr": 1e-2},
             )
-            G, d = mdl.train(true_y, sampling, generator=generator, max_iter=200)
+            G, d = mdl.train(
+                true_y,
+                sampling,
+                generator=generator,
+                max_iter=300,
+                lr_decay=0.99,
+            )
             output.save({"model": mdl, "result": (G, d)})

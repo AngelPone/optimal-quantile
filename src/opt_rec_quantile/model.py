@@ -67,8 +67,11 @@ class QOptRec:
         G: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
         max_iter: int = 200,
+        lr_decay: float = 1.0,
     ):
         assert y.shape[1] == self.n
+        if not 0 < lr_decay <= 1:
+            raise ValueError("lr_decay must be in (0, 1].")
         if G is None:
             G = torch.rand(
                 (self.m, self.n),
@@ -99,6 +102,11 @@ class QOptRec:
             loss = self._loss(y, y_pred, G, d)
             loss.backward()
             optimizer.step()
+            param_groups = getattr(optimizer, "param_groups", None)
+            if param_groups is not None:
+                if lr_decay < 1:
+                    for param_group in param_groups:
+                        param_group["lr"] *= lr_decay
 
             with torch.no_grad():
                 eval_y_pred = y_pred
