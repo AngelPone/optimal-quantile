@@ -1,4 +1,5 @@
 import torch
+import math
 from opt_rec_quantile.loss import ApproxPinballLoss, approx_pinball_loss, pinball_loss
 from typing import Callable
 
@@ -87,8 +88,8 @@ class QOptRec:
             else:
                 raise ValueError(f"Initialization of using {G} is not supported")
         else:
-            assert G.shape == (self.m, self.m), "invalid shape of G"
-            G = torch.tensor(
+            assert G.shape == (self.m, self.n), "invalid shape of G"
+            G = torch.as_tensor(
                 G,
                 dtype=y.dtype,
                 device=y.device,

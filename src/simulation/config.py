@@ -9,7 +9,7 @@ WINDOW_S = 850
 TRAIN_WINDOWS = 100
 TEST_WINDOWS = 50
 DF = 6
-SAMPLE_SIZE = 500
+SAMPLE_SIZE = 100
 OUTPUT_SAMPLE_SIZE = 10000
 data_catalog = DataCatalog(name="simulation")
 

@@ -12,6 +12,7 @@ from simulation.config import (
     scenario_alpha_seed,
 )
 from utils import expanding_window
+from forecopy import cscov, cstools
 from opt_rec_quantile.model import QOptRec
 from typing import Annotated, List, Any
 from torch.optim import Adam
@@ -78,14 +79,20 @@ for scenario in SCENARIOS:
                 A=A,
                 alpha=alpha,
                 beta=20.0,
-                optimizer_cls=Adam,
-                optimizer_kwargs={"lr": 1e-2},
+                optimizer_cls=torch.optim.SGD,
+                optimizer_kwargs={"lr": 0.01},
             )
+
+            params = cstools(A.numpy())
+            W = cscov(params, train_base[0]["resid"].T).fit(comb="shr")
+            W = torch.linalg.inv(torch.as_tensor(W, dtype=torch.float64))
+            G_init = torch.linalg.solve(mdl.S.T @ W @ mdl.S, mdl.S.T @ W)
             G, d = mdl.train(
                 true_y,
                 sampling,
+                G=G_init,
                 generator=generator,
                 max_iter=300,
-                lr_decay=0.99,
+                lr_decay=1,
             )
             output.save({"model": mdl, "result": (G, d)})
