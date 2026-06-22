@@ -64,7 +64,7 @@ class QOptRec:
         self,
         y: torch.Tensor,
         sample: Callable[[], torch.Tensor],
-        G: torch.Tensor | None = None,
+        G: torch.Tensor | str = "ols",
         generator: torch.Generator | None = None,
         max_iter: int = 200,
         lr_decay: float = 1.0,
@@ -72,15 +72,22 @@ class QOptRec:
         assert y.shape[1] == self.n
         if not 0 < lr_decay <= 1:
             raise ValueError("lr_decay must be in (0, 1].")
-        if G is None:
-            G = torch.rand(
-                (self.m, self.n),
-                requires_grad=True,
-                dtype=y.dtype,
-                device=y.device,
-                generator=generator,
-            )
+        if isinstance(G, str):
+            if G == "ols":
+                G = torch.linalg.solve(self.S.T @ self.S, self.S.T)
+                G = torch.tensor(G, requires_grad=True)
+            elif G == "random":
+                G = torch.rand(
+                    (self.m, self.n),
+                    requires_grad=True,
+                    dtype=y.dtype,
+                    device=y.device,
+                    generator=generator,
+                )
+            else:
+                raise ValueError(f"Initialization of using {G} is not supported")
         else:
+            assert G.shape == (self.m, self.m), "invalid shape of G"
             G = torch.tensor(
                 G,
                 dtype=y.dtype,
