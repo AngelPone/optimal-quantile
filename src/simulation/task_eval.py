@@ -30,16 +30,18 @@ for scenario in SCENARIOS:
         scenario: str = scenario,
     ):
         y = input_data[0]
-        true_y = expanding_window(y.shape[0], WINDOW_S, 1, y).collect_test()[
-            -TEST_WINDOWS:, :
-        ]
+        true_y = (
+            expanding_window(y.shape[0], WINDOW_S, 1, y)
+            .collect_test()
+            .squeeze()[-TEST_WINDOWS:, :]
+        )
         true_y = torch.as_tensor(true_y, dtype=torch.float64)
-
+        assert true_y.shape == (TEST_WINDOWS, 9), f"dim {true_y.shape} is not correct"
         output_dict = {"method": [], "loss": [], "alpha": []}
         for alpha, rf_samples in zip(ALPHAs, input):
             for method, samples in rf_samples.items():
                 q = torch.quantile(samples, alpha, dim=2)
-                loss = pinball_loss(true_y - q, alpha=alpha).detach().item()
+                loss = pinball_loss(true_y - q, alpha=alpha).detach().item() * 9
                 output_dict["method"].append(method)
                 output_dict["alpha"].append(alpha)
                 output_dict["loss"].append(loss)
