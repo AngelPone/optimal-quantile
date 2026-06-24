@@ -2,7 +2,7 @@ from utils import expanding_window, mle_estimation_skewed_dist
 from typing import Annotated
 from tourism.config import data_catalog, DF, WINDOW_S
 from pytask import task, Product
-from statsforecast.arima import AutoARIMA
+from statsforecast.models import AutoARIMA
 import numpy as np
 import torch
 
@@ -13,18 +13,18 @@ def task_base_forecast(
     node: Annotated[list, Product] = data_catalog["tourism_base"],
 ):
     output = []
-    for train, _ in expanding_window(input_data.shape[0], WINDOW_S, 1, input_data):
+    for train, test in expanding_window(input_data.shape[0], WINDOW_S, 1, input_data):
         mean = []
         resids = []
         skewt = []
         normals = []
         for i in range(input_data.shape[1]):
-            mdl = AutoARIMA()
+            mdl = AutoARIMA(season_length=12)
             mdl.fit(train[:, i])
             fcasts = mdl.predict(h=1)["mean"]
-            resid = train[:, i] - mdl.predict_in_sample()["fitted"]
+            resid = mdl.model_["residuals"]
             dist = mle_estimation_skewed_dist(resid, DF)
-            normal = torch.distributions.Normal(torch.mean(resid), torch.std(resid))
+            normal = torch.distributions.Normal(resid.mean(), resid.std())
             mean.append(fcasts)
             resids.append(resid)
             skewt.append(dist)
@@ -37,6 +37,8 @@ def task_base_forecast(
                 "normal": normals,
                 "skewt": skewt,
                 "resid": resids,
+                "hist": train,
+                "future": test,
             }
         )
     node.save(output)

@@ -41,7 +41,7 @@ for scenario in SCENARIOS:
         for alpha, rf_samples in zip(ALPHAs, input):
             for method, samples in rf_samples.items():
                 q = torch.quantile(samples, alpha, dim=2)
-                loss = pinball_loss(true_y - q, alpha=alpha).detach().item() * 9
+                loss = pinball_loss(true_y - q, alpha=alpha).detach().item()
                 output_dict["method"].append(method)
                 output_dict["alpha"].append(alpha)
                 output_dict["loss"].append(loss)

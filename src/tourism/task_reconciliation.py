@@ -73,7 +73,11 @@ for alpha in ALPHAs:
                 [
                     torch.stack(
                         [
-                            series.sample(SAMPLE_SIZE, generator=generator)
+                            torch.normal(
+                                series.loc.expand(SAMPLE_SIZE),
+                                series.scale.expand(SAMPLE_SIZE),
+                                generator=generator,
+                            )
                             for series in window["normal"]
                         ]
                     )
@@ -99,7 +103,7 @@ for alpha in ALPHAs:
             true_y,
             sampling_skewt,
             generator=generator,
-            max_iter=500,
+            max_iter=300,
             lr_decay=1,
         )
 

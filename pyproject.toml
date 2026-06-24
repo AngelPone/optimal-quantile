@@ -25,4 +25,4 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytask.ini_options]
-paths = [ "src/simulation" ]
+paths = [ "src/simulation", "src/tourism" ]

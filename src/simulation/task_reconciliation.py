@@ -83,14 +83,13 @@ for scenario in SCENARIOS:
                 optimizer_kwargs={"lr": 0.01},
             )
 
-            params = cstools(A.numpy())
-            W = cscov(params, train_base[0]["resid"].T).fit(comb="shr")
-            W = torch.linalg.inv(torch.as_tensor(W, dtype=torch.float64))
-            G_init = torch.linalg.solve(mdl.S.T @ W @ mdl.S, mdl.S.T @ W)
+            # params = cstools(A.numpy())
+            # W = cscov(params, train_base[0]["resid"].T).fit(comb="shr")
+            # W = torch.linalg.inv(torch.as_tensor(W, dtype=torch.float64))
+            # G_init = torch.linalg.solve(mdl.S.T @ W @ mdl.S, mdl.S.T @ W)
             G, d = mdl.train(
                 true_y,
                 sampling,
-                G=G_init,
                 generator=generator,
                 max_iter=300,
                 lr_decay=1,

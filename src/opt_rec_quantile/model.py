@@ -76,7 +76,7 @@ class QOptRec:
         if isinstance(G, str):
             if G == "ols":
                 G = torch.linalg.solve(self.S.T @ self.S, self.S.T)
-                G = torch.tensor(G, requires_grad=True)
+                G = torch.as_tensor(G).requires_grad_()
             elif G == "random":
                 G = torch.rand(
                     (self.m, self.n),

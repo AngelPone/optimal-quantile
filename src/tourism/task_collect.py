@@ -70,17 +70,35 @@ for alpha in ALPHAs:
             mean = torch.stack(
                 [window["mean"] for window in input_base[-TEST_WINDOWS:]],
             )
-            samples = torch.stack(
-                [
-                    torch.stack(
-                        [
-                            series.sample(OUTPUT_SAMPLE_SIZE, generator=generator)
-                            for series in window[dist]
-                        ]
-                    )
-                    for window in input_base[-TEST_WINDOWS:]
-                ]
-            )
+            if dist == "skewt":
+                samples = torch.stack(
+                    [
+                        torch.stack(
+                            [
+                                series.sample(OUTPUT_SAMPLE_SIZE, generator=generator)
+                                for series in window[dist]
+                            ]
+                        )
+                        for window in input_base[-TEST_WINDOWS:]
+                    ]
+                )
+            elif dist == "normal":
+                samples = torch.stack(
+                    [
+                        torch.stack(
+                            [
+                                torch.normal(
+                                    series.loc.expand(OUTPUT_SAMPLE_SIZE),
+                                    series.scale.expand(OUTPUT_SAMPLE_SIZE),
+                                    generator=generator,
+                                )
+                                for series in window[dist]
+                            ]
+                        )
+                        for window in input_base[-TEST_WINDOWS:]
+                    ]
+                )
+
             samples = mean[:, :, None] + samples
 
             G, d = input_rf["result"]

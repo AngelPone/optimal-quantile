@@ -31,9 +31,7 @@ for dist in ["normal", "skewt"]:
         for alpha, samples_by_method in zip(ALPHAs, input_samples):
             for method, samples in samples_by_method.items():
                 q = torch.quantile(samples, alpha, dim=2)
-                loss = (
-                    pinball_loss(true_y - q, alpha=alpha).detach().item() * S.shape[0]
-                )
+                loss = pinball_loss(true_y - q, alpha=alpha).detach().item()
                 output_dict["method"].append(method)
                 output_dict["alpha"].append(alpha)
                 output_dict["loss"].append(loss)
