@@ -8,6 +8,7 @@ dependencies = [
     "cvxpy>=1.9.1",
     "forecopy>=0.1.1",
     "matplotlib>=3.11.0",
+    "notebook>=7.6.0",
     "numpy>=2.4.6",
     "pandas>=2.3.3",
     "pytask>=0.6.0",

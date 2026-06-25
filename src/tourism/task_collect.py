@@ -104,7 +104,8 @@ for alpha in ALPHAs:
             G, d = input_rf["result"]
 
             rf_samples = (
-                torch.einsum("tnj,kn->tkj", samples, S @ G) + (S @ d)[None, :, None]
+                torch.einsum("tnj,kn->tkj", samples, S @ G)
+                + (S @ d * 10000)[None, :, None]
             )
 
             res = benchmarks(

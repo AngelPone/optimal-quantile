@@ -56,7 +56,7 @@ for alpha in ALPHAs:
         generator = torch.Generator(device=true_y.device)
         generator.manual_seed(seed)
 
-        n_train = math.ceil(len(train_base) * 0.8)
+        n_train = math.ceil(len(train_base) * 0.9)
         perm = torch.randperm(len(train_base), generator=generator)
 
         train_perm = perm[:n_train]
@@ -112,7 +112,7 @@ for alpha in ALPHAs:
             true_y[train_perm, :] / 10000,
             lambda: sampling("skewt", train_perm),
             generator=generator,
-            max_iter=200,
+            max_iter=300,
             lr_decay=1,
             sampling_val=lambda: sampling("skewt", val_perm, OUTPUT_SAMPLE_SIZE),
             y_val=true_y[val_perm] / 10000,
@@ -132,7 +132,7 @@ for alpha in ALPHAs:
             true_y[train_perm] / 10000,
             lambda: sampling("normal", train_perm, SAMPLE_SIZE),
             generator=generator,
-            max_iter=200,
+            max_iter=300,
             lr_decay=1,
             sampling_val=lambda: sampling("normal", val_perm, OUTPUT_SAMPLE_SIZE),
             y_val=true_y[val_perm] / 10000,
