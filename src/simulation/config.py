@@ -5,12 +5,16 @@ import torch
 SRC = Path(__file__).parent.resolve()
 BLD = (Path(__file__).parent.parent.parent / "output").resolve()
 
-WINDOW_S = 850
-TRAIN_WINDOWS = 100
-TEST_WINDOWS = 50
-DF = 6
-SAMPLE_SIZE = 500
+WINDOW_S = 200
+TRAIN_WINDOWS = 400
+TEST_WINDOWS = 400
+DF = 8
+SAMPLE_SIZE = 100
+SKEWNESS_POS = 1.5
+SKEWNESS_NEG = 0.66
 OUTPUT_SAMPLE_SIZE = 10000
+BETA = 100
+LR = 0.01
 data_catalog = DataCatalog(name="simulation")
 
 A = torch.tensor(

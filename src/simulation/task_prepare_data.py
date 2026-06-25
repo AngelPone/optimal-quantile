@@ -4,7 +4,7 @@ from sstudentt import SST
 
 from typing import Annotated
 from pytask import Product, task
-from simulation.config import data_catalog, DF, SCENARIOS
+from simulation.config import data_catalog, DF, SCENARIOS, SKEWNESS_POS, SKEWNESS_NEG
 
 
 def cov_to_cor(mat):
@@ -24,25 +24,9 @@ def generate_stationary_ar2(n=1, margin=1e-4, rng=None):
     return np.column_stack([phi1, phi2])
 
 
-def random_negative_gram(n=6, low=-0.20, high=-0.02, margin=0.1, rng=None):
-    G = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            val = rng.uniform(low, high)
-            G[i, j] = val
-            G[j, i] = val
-
-    diag = np.sum(np.abs(G), axis=1) + margin
-    np.fill_diagonal(G, diag)
-
-    # G = A @ A.T
-    A = np.linalg.cholesky(G)
-    return A
-
-
 scenario_id = 0
-for dependence in ["positive", "negative"]:
-    for skewness in ["positive", "negative"]:
+for skewness in ["positive", "negative"]:
+    for dependence in ["positive", "negative"]:
         scenario_id += 1
         scenario = SCENARIOS[scenario_id - 1]
 
@@ -54,17 +38,17 @@ for dependence in ["positive", "negative"]:
             skewness: str = skewness,
         ) -> None:
             rng = np.random.default_rng(seed)
-            N = 50
             T = 20000
+            m = 6
             S = np.array([[1, 1, 1, 1, 1, 1], [1, 1, 1, 0, 0, 0], [0, 0, 0, 1, 1, 1]])
             S = np.concat([S, np.identity(6)])
-            A_pos = rng.normal(1, size=(6, 6))
-            A_neg = random_negative_gram(6, rng=rng)
-            wishart_scale_pos = A_pos @ A_pos.T + 0.01 * np.identity(6)
-            wishart_scale_neg = A_neg @ A_neg.T + 0.01 * np.identity(6)
+            wishart_scale_pos = np.full((m, m), 0.8)
+            np.fill_diagonal(wishart_scale_pos, 5)
+            wishart_scale_neg = np.full((m, m), -0.8)
+            np.fill_diagonal(wishart_scale_neg, 5)
             mean = np.array([0, 0, 0, 0, 0, 0], dtype=np.float64)
-            out = []
-            while len(out) < N:
+            out = None
+            while True:
                 if dependence == "positive":
                     cov_mat = wishart.rvs(100, wishart_scale_pos, random_state=rng)
                 else:
@@ -78,10 +62,10 @@ for dependence in ["positive", "negative"]:
                 noise = rng.multivariate_normal(mean, cov_to_cor(cov_mat), size=T)
                 noise_cdf = norm.cdf(noise)
                 if skewness == "positive":
-                    dist = SST(0.0, 1.0, 5.0, DF)
+                    dist = SST(0.0, 10, SKEWNESS_POS, DF)
                     skew_noise = dist.q(noise_cdf)
                 else:
-                    dist = SST(0.0, 1.0, 0.2, DF)
+                    dist = SST(0.0, 10, SKEWNESS_NEG, DF)
                     skew_noise = dist.q(noise_cdf)
                 y = np.zeros((T + 2, 6), dtype=np.float64)
                 # generate AR parameters
@@ -91,5 +75,6 @@ for dependence in ["positive", "negative"]:
                 for i in range(T):
                     y[i + 2, :] = ar1 * y[i + 1,] + ar2 * y[i,] + skew_noise[i,]
                 y = y @ S.T
-                out.append(y[-1000:, :])
-            node.save(out)
+                out = y[-1000:, :]
+                break
+            node.save({"cov": cov_mat, "y": out, "ar": ar})

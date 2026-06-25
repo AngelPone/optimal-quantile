@@ -9,6 +9,8 @@ from simulation.config import (
     WINDOW_S,
     TRAIN_WINDOWS,
     TEST_WINDOWS,
+    BETA,
+    LR,
     scenario_alpha_seed,
 )
 from utils import expanding_window
@@ -37,7 +39,7 @@ for scenario in SCENARIOS:
             alpha: float = alpha,
             seed: int = seed,
         ):
-            y = torch.as_tensor(input_data[0], dtype=torch.float64)
+            y = torch.as_tensor(input_data["y"], dtype=torch.float64)
             windows = expanding_window(y.shape[0], WINDOW_S, 1, y)
             test_windows = windows.collect_test().squeeze(1)
             expected_windows = TRAIN_WINDOWS + TEST_WINDOWS
@@ -78,9 +80,9 @@ for scenario in SCENARIOS:
             mdl = QOptRec(
                 A=A,
                 alpha=alpha,
-                beta=20.0,
-                optimizer_cls=torch.optim.SGD,
-                optimizer_kwargs={"lr": 0.01},
+                beta=BETA,
+                optimizer_cls=torch.optim.Adam,
+                optimizer_kwargs={"lr": LR},
             )
 
             # params = cstools(A.numpy())
@@ -91,7 +93,7 @@ for scenario in SCENARIOS:
                 true_y,
                 sampling,
                 generator=generator,
-                max_iter=300,
+                max_iter=200,
                 lr_decay=1,
             )
             output.save({"model": mdl, "result": (G, d)})

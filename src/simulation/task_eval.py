@@ -29,7 +29,7 @@ for scenario in SCENARIOS:
         / f"simulation_acc_{scenario}.tex",
         scenario: str = scenario,
     ):
-        y = input_data[0]
+        y = input_data["y"]
         true_y = (
             expanding_window(y.shape[0], WINDOW_S, 1, y)
             .collect_test()

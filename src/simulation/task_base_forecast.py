@@ -13,7 +13,7 @@ for scenario in SCENARIOS:
         input: Annotated[np.ndarray, data_catalog[f"simulation_{scenario}"]],
         node: Annotated[list, Product] = data_catalog[f"simulation_base_{scenario}"],
     ):
-        input = input[0]
+        input = input["y"]
         output = []
         for train, _ in expanding_window(input.shape[0], WINDOW_S, 1, input):
             mean = []
