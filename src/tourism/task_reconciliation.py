@@ -101,6 +101,7 @@ for alpha in ALPHAs:
         )
 
         params = cstools(A.numpy())
+
         W = cscov(params, input_base[-TEST_WINDOWS - 1]["resid"].T).fit(comb="shr")
         W = torch.linalg.inv(torch.as_tensor(W, dtype=torch.float64))
         G_init = torch.linalg.solve(mdl.S.T @ W @ mdl.S, mdl.S.T @ W)
