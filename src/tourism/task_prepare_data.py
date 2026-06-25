@@ -7,6 +7,7 @@ from tourism.config import (
     TRAIN_WINDOWS,
     TEST_WINDOWS,
     TOURISM_START,
+    VALID_WINDOWS,
     WINDOW_S,
     data_catalog,
 )
@@ -21,7 +22,7 @@ def task_prepare_data(
     dt = dt.loc[dt["Month"] >= TOURISM_START].reset_index(drop=True)
     values = dt.drop(columns=["Month"]).to_numpy(dtype=np.float64)
 
-    expected_periods = WINDOW_S + TRAIN_WINDOWS + TEST_WINDOWS
+    expected_periods = WINDOW_S + TRAIN_WINDOWS + TEST_WINDOWS + VALID_WINDOWS
     if values.shape != (expected_periods, S.shape[0]):
         raise ValueError(
             "Tourism data does not match the configured empirical window: "

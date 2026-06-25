@@ -1,5 +1,4 @@
 from pytask import task, Product
-import math
 
 from tourism.config import (
     A,
@@ -7,6 +6,7 @@ from tourism.config import (
     SAMPLE_SIZE,
     TEST_WINDOWS,
     TRAIN_WINDOWS,
+    VALID_WINDOWS,
     WINDOW_S,
     data_catalog,
     tourism_alpha_seed,
@@ -19,6 +19,7 @@ from opt_rec_quantile.model import QOptRec
 from typing import Annotated, Any
 import numpy as np
 import torch
+from forecopy import cscov, cstools
 
 for alpha in ALPHAs:
     seed = tourism_alpha_seed(alpha, offset=10_000)
@@ -37,7 +38,7 @@ for alpha in ALPHAs:
         y = torch.as_tensor(input_data, dtype=torch.float64)
         windows = expanding_window(y.shape[0], WINDOW_S, 1, y)
         test_windows = windows.collect_test().squeeze(1)
-        expected_windows = TRAIN_WINDOWS + TEST_WINDOWS
+        expected_windows = TRAIN_WINDOWS + TEST_WINDOWS + VALID_WINDOWS
         if len(input_base) != test_windows.shape[0]:
             raise ValueError(
                 "Base forecast windows and true-y windows are not aligned: "
@@ -46,21 +47,16 @@ for alpha in ALPHAs:
         if len(input_base) != expected_windows:
             raise ValueError(
                 "Configured train/test split does not match available windows: "
-                f"{TRAIN_WINDOWS} + {TEST_WINDOWS} != {len(input_base)}."
+                f"{TRAIN_WINDOWS} + {TEST_WINDOWS} + {VALID_WINDOWS} != {len(input_base)}."
             )
 
         train_slice = slice(0, TRAIN_WINDOWS)
-        true_y = test_windows[train_slice, :]
-        train_base = input_base[train_slice]
-        mean = torch.stack([window["mean"] for window in train_base])
-        generator = torch.Generator(device=true_y.device)
+        valid_slice = slice(TRAIN_WINDOWS, TRAIN_WINDOWS + VALID_WINDOWS)
+        y_train = test_windows[train_slice, :]
+        y_val = test_windows[valid_slice, :]
+        mean = torch.stack([window["mean"] for window in input_base])
+        generator = torch.Generator(device=y_train.device)
         generator.manual_seed(seed)
-
-        n_train = math.ceil(len(train_base) * 0.9)
-        perm = torch.randperm(len(train_base), generator=generator)
-
-        train_perm = perm[:n_train]
-        val_perm = perm[n_train:]
 
         def sampling(dist: str, indices, J: int = SAMPLE_SIZE):
             if dist == "skewt":
@@ -69,10 +65,10 @@ for alpha in ALPHAs:
                         torch.stack(
                             [
                                 series.sample(J, generator=generator)
-                                for series in train_base[idx]["skewt"]
+                                for series in window["skewt"]
                             ]
                         )
-                        for idx in indices
+                        for window in input_base[indices]
                     ]
                 )
             elif dist == "normal":
@@ -85,10 +81,10 @@ for alpha in ALPHAs:
                                     series.scale.expand(J),
                                     generator=generator,
                                 )
-                                for series in train_base[idx]["normal"]
+                                for series in window["normal"]
                             ]
                         )
-                        for idx in indices
+                        for window in input_base[indices]
                     ]
                 )
             else:
@@ -104,18 +100,19 @@ for alpha in ALPHAs:
             optimizer_kwargs={"lr": LR},
         )
 
-        # params = cstools(A.numpy())
-        # W = cscov(params, train_base[0]["resid"].T).fit(comb="shr")
-        # W = torch.linalg.inv(torch.as_tensor(W, dtype=torch.float64))
-        # G_init = torch.linalg.solve(mdl.S.T @ W @ mdl.S, mdl.S.T @ W)
+        params = cstools(A.numpy())
+        W = cscov(params, input_base[-TEST_WINDOWS - 1]["resid"].T).fit(comb="shr")
+        W = torch.linalg.inv(torch.as_tensor(W, dtype=torch.float64))
+        G_init = torch.linalg.solve(mdl.S.T @ W @ mdl.S, mdl.S.T @ W)
         G, d = mdl.train(
-            true_y[train_perm, :] / 10000,
-            lambda: sampling("skewt", train_perm),
+            y_train / 10000,
+            lambda: sampling("skewt", train_slice),
+            G=G_init,
             generator=generator,
-            max_iter=300,
+            max_iter=200,
             lr_decay=1,
-            sampling_val=lambda: sampling("skewt", val_perm, OUTPUT_SAMPLE_SIZE),
-            y_val=true_y[val_perm] / 10000,
+            sampling_val=lambda: sampling("skewt", valid_slice, OUTPUT_SAMPLE_SIZE),
+            y_val=y_val / 10000,
         )
 
         output.save({"model": mdl, "result": (G, d)})
@@ -129,13 +126,14 @@ for alpha in ALPHAs:
         )
 
         G2, d2 = mdl2.train(
-            true_y[train_perm] / 10000,
-            lambda: sampling("normal", train_perm, SAMPLE_SIZE),
+            y_train / 10000,
+            lambda: sampling("normal", train_slice, SAMPLE_SIZE),
+            G=G_init,
             generator=generator,
-            max_iter=300,
+            max_iter=200,
             lr_decay=1,
-            sampling_val=lambda: sampling("normal", val_perm, OUTPUT_SAMPLE_SIZE),
-            y_val=true_y[val_perm] / 10000,
+            sampling_val=lambda: sampling("normal", valid_slice, OUTPUT_SAMPLE_SIZE),
+            y_val=y_val / 10000,
         )
 
         output_normal.save({"model": mdl2, "result": (G2, d2)})

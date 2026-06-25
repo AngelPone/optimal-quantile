@@ -6,7 +6,8 @@ import torch
 SRC = Path(__file__).parent.resolve()
 BLD = (Path(__file__).parent.parent.parent / "output").resolve()
 
-TRAIN_WINDOWS = (2014 - 2008 + 1) * 12
+TRAIN_WINDOWS = (2013 - 2008 + 1) * 12
+VALID_WINDOWS = 12
 TEST_WINDOWS = (2019 - 2015 + 1) * 12
 WINDOW_S = (2007 - 1998 + 1) * 12
 DF = 6
@@ -16,7 +17,7 @@ TOURISM_START = "1998-01"
 ALPHAs = [0.05, 0.2, 0.8, 0.95]
 TOURISM_SEED = 20260623
 BETA = 100
-LR = 0.01
+LR = 0.001
 
 data_catalog = DataCatalog(name="tourism")
 

@@ -72,15 +72,15 @@ torch.randint(0, 10, (torch.ceil(torch.as_tensor(10 * 0.9)).item(),))
 # %%
 from tourism.config import data_catalog
 
-q = 0.2
-samples_normal = data_catalog[f"tourism_samples_{q}_normal"].load()
+q = 0.05
+samples_normal = data_catalog[f"tourism_samples_{q}_skewt"].load()
 true_y = torch.tensor(data_catalog["tourism"].load()[-60:,])
 basef = data_catalog["tourism_base"].load()
 
 # %%
 import matplotlib.pyplot as plt
 
-rf = data_catalog[f"tourism_rf_{q}_normal"].load()
+rf = data_catalog[f"tourism_rf_{q}_skew"].load()
 plt.plot(rf["model"].pinball_loss_history_)
 plt.plot(rf["model"].smooth_loss_history_)
 
