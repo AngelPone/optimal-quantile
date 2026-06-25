@@ -65,11 +65,13 @@ class QOptRec:
     def train(
         self,
         y: torch.Tensor,
-        sample: Callable[[], torch.Tensor],
+        sampling: Callable[[], torch.Tensor],
         G: torch.Tensor | str = "ols",
         generator: torch.Generator | None = None,
         max_iter: int = 200,
         lr_decay: float = 1.0,
+        sampling_val: Callable[[], torch.Tensor] | None = None,
+        y_val: torch.Tensor | None = None,
     ):
         assert y.shape[1] == self.n
         if not 0 < lr_decay <= 1:
@@ -106,10 +108,16 @@ class QOptRec:
         self.smooth_loss_history_ = []
         self.pinball_loss_history_ = []
 
-        eval_y_pred = self._as_training_tensor(sample(10000), y)
+        eval_y_pred = (
+            self._as_training_tensor(sampling_val(), y)
+            if sampling_val is not None
+            else sampling()
+        )
+        if sampling_val is not None:
+            assert y_val is not None
         for step in range(max_iter):
             optimizer.zero_grad()
-            y_pred = self._as_training_tensor(sample(), y)
+            y_pred = self._as_training_tensor(sampling(), y)
             loss = self._loss(y, y_pred, G, d)
             loss.backward()
             optimizer.step()
@@ -120,7 +128,9 @@ class QOptRec:
                         param_group["lr"] *= lr_decay
 
             with torch.no_grad():
-                current_pinball_loss = self._pinball_loss(y, eval_y_pred, G, d).item()
+                current_pinball_loss = self._pinball_loss(
+                    y_val, eval_y_pred, G, d
+                ).item()
                 self.smooth_loss_history_.append(loss.detach().item())
                 self.pinball_loss_history_.append(current_pinball_loss)
                 if current_pinball_loss < best_pinball_loss:
