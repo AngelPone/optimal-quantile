@@ -23,23 +23,23 @@ def benchmarks(samples, A, resids):
     shrs = []
     sams = []
     for i in range(len(resids)):
-        ols = csrec(np.array(samples[i, :, :].T), params=params, res=resids[i].T)
+        ols = csrec(np.array(samples[i, :, :].T), params=params, res=resids[0].T)
         olss.append(ols.T)
         wls = csrec(
-            np.array(samples[i, :, :].T), params=params, res=resids[i].T, comb="wls"
+            np.array(samples[i, :, :].T), params=params, res=resids[0].T, comb="wls"
         )
         wlss.append(wls.T)
         shr = csrec(
             np.array(samples[i, :, :].T),
             params=params,
-            res=resids[i].T,
+            res=resids[0].T,
             comb="shr",
         )
         shrs.append(shr.T)
         sam = csrec(
             np.array(samples[i, :, :].T),
             params=params,
-            res=resids[i].T,
+            res=resids[0].T,
             comb="sam",
         )
         sams.append(sam.T)

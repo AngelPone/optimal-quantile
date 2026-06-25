@@ -2,6 +2,7 @@ import torch
 import math
 from opt_rec_quantile.loss import ApproxPinballLoss, approx_pinball_loss, pinball_loss
 from typing import Callable
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 class QOptRec:
@@ -99,11 +100,13 @@ class QOptRec:
         optimizer = self.optimizer_cls(params=[G, d], **optimizer_kwargs)
 
         best_pinball_loss = float("inf")
+        scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.5)
         best_G = G.detach().clone()
         best_d = d.detach().clone()
         self.smooth_loss_history_ = []
         self.pinball_loss_history_ = []
 
+        eval_y_pred = self._as_training_tensor(sample(10000), y)
         for step in range(max_iter):
             optimizer.zero_grad()
             y_pred = self._as_training_tensor(sample(), y)
@@ -117,7 +120,6 @@ class QOptRec:
                         param_group["lr"] *= lr_decay
 
             with torch.no_grad():
-                eval_y_pred = y_pred
                 current_pinball_loss = self._pinball_loss(y, eval_y_pred, G, d).item()
                 self.smooth_loss_history_.append(loss.detach().item())
                 self.pinball_loss_history_.append(current_pinball_loss)
@@ -125,6 +127,7 @@ class QOptRec:
                     best_pinball_loss = current_pinball_loss
                     best_G = G.detach().clone()
                     best_d = d.detach().clone()
+            scheduler.step(current_pinball_loss)
 
             print(
                 f"Step {step}: loss: {loss.detach():.4f}, "

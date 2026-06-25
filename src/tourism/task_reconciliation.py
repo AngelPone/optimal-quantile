@@ -9,9 +9,10 @@ from tourism.config import (
     WINDOW_S,
     data_catalog,
     tourism_alpha_seed,
+    BETA,
+    LR,
 )
 from utils import expanding_window
-from forecopy import cscov, cstools
 from opt_rec_quantile.model import QOptRec
 from typing import Annotated, Any
 import numpy as np
@@ -53,12 +54,12 @@ for alpha in ALPHAs:
         generator = torch.Generator(device=true_y.device)
         generator.manual_seed(seed)
 
-        def sampling_skewt():
+        def sampling_skewt(J:int = SAMPLE_SIZE):
             samples = torch.stack(
                 [
                     torch.stack(
                         [
-                            series.sample(SAMPLE_SIZE, generator=generator)
+                            series.sample(J, generator=generator)
                             for series in window["skewt"]
                         ]
                     )
@@ -66,16 +67,16 @@ for alpha in ALPHAs:
                 ]
             )
             samples = mean[:, :, None] + samples
-            return samples
+            return samples / 10000
 
-        def sampling_normal():
+        def sampling_normal(J: int = SAMPLE_SIZE):
             samples = torch.stack(
                 [
                     torch.stack(
                         [
                             torch.normal(
-                                series.loc.expand(SAMPLE_SIZE),
-                                series.scale.expand(SAMPLE_SIZE),
+                                series.loc.expand(J),
+                                series.scale.expand(J),
                                 generator=generator,
                             )
                             for series in window["normal"]
@@ -85,14 +86,14 @@ for alpha in ALPHAs:
                 ]
             )
             samples = mean[:, :, None] + samples
-            return samples
+            return samples / 10000
 
         mdl = QOptRec(
             A=A,
             alpha=alpha,
-            beta=20.0,
+            beta=BETA,
             optimizer_cls=torch.optim.Adam,
-            optimizer_kwargs={"lr": 0.01},
+            optimizer_kwargs={"lr": LR},
         )
 
         # params = cstools(A.numpy())
@@ -100,10 +101,10 @@ for alpha in ALPHAs:
         # W = torch.linalg.inv(torch.as_tensor(W, dtype=torch.float64))
         # G_init = torch.linalg.solve(mdl.S.T @ W @ mdl.S, mdl.S.T @ W)
         G, d = mdl.train(
-            true_y,
+            true_y / 10000,
             sampling_skewt,
             generator=generator,
-            max_iter=300,
+            max_iter=200,
             lr_decay=1,
         )
 
@@ -112,11 +113,17 @@ for alpha in ALPHAs:
         mdl2 = QOptRec(
             A=A,
             alpha=alpha,
-            beta=20.0,
+            beta=BETA,
             optimizer_cls=torch.optim.Adam,
-            optimizer_kwargs={"lr": 0.01},
+            optimizer_kwargs={"lr": LR},
         )
+
         G2, d2 = mdl2.train(
-            true_y, sampling_normal, generator=generator, max_iter=500, lr_decay=1
+            true_y / 10000,
+            sampling_normal,
+            generator=generator,
+            max_iter=200,
+            lr_decay=1,
         )
+
         output_normal.save({"model": mdl2, "result": (G2, d2)})

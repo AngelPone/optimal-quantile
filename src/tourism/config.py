@@ -15,6 +15,8 @@ OUTPUT_SAMPLE_SIZE = 10000
 TOURISM_START = "1998-01"
 ALPHAs = [0.05, 0.2, 0.8, 0.95]
 TOURISM_SEED = 20260623
+BETA = 100
+LR = 0.01
 
 data_catalog = DataCatalog(name="tourism")
 
