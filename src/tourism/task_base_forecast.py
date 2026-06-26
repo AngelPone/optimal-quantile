@@ -7,7 +7,6 @@ import numpy as np
 import torch
 
 
-@task
 def task_base_forecast(
     input_data: Annotated[np.ndarray, data_catalog["tourism"]],
     node: Annotated[list, Product] = data_catalog["tourism_base"],
@@ -41,4 +40,5 @@ def task_base_forecast(
                 "future": test,
             }
         )
+
     node.save(output)

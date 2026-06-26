@@ -6,10 +6,10 @@ import torch
 SRC = Path(__file__).parent.resolve()
 BLD = (Path(__file__).parent.parent.parent / "output").resolve()
 
-TRAIN_WINDOWS = (2013 - 2008 + 1) * 12
+TRAIN_WINDOWS = (2013 - 2006 + 1) * 12
 VALID_WINDOWS = 12
 TEST_WINDOWS = (2019 - 2015 + 1) * 12
-WINDOW_S = (2007 - 1998 + 1) * 12
+WINDOW_S = (2005 - 1998 + 1) * 12
 DF = 6
 SAMPLE_SIZE = 300
 OUTPUT_SAMPLE_SIZE = 10000

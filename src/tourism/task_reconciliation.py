@@ -115,7 +115,6 @@ for alpha in ALPHAs:
             sampling_val=lambda: sampling("skewt", valid_slice, OUTPUT_SAMPLE_SIZE),
             y_val=y_val / 10000,
         )
-
         output.save({"model": mdl, "result": (G, d)})
 
         mdl2 = QOptRec(

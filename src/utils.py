@@ -242,6 +242,6 @@ def mle_estimation_skewed_dist(
     xi = torch.exp(eta.detach())
     # stablize the estimation of xi
     if torch.all(xi > 3):
-        xi = torch.as_tensor(3)
+        xi = torch.as_tensor(3.0, dtype=dtype)
 
     return SkewStudentT(xi, df, x_mean, x_sd)
