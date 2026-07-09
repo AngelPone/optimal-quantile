@@ -1,4 +1,5 @@
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 import math
 from opt_rec_quantile.loss import ApproxPinballLoss, approx_pinball_loss, pinball_loss
 from typing import Callable
@@ -72,6 +73,7 @@ class QOptRec:
         lr_decay: float = 1.0,
         sampling_val: Callable[[], torch.Tensor] | None = None,
         y_val: torch.Tensor | None = None,
+        batch_size: int | None = None,
     ):
         assert y.shape[1] == self.n
         if not 0 < lr_decay <= 1:
@@ -108,19 +110,36 @@ class QOptRec:
         self.smooth_loss_history_ = []
         self.pinball_loss_history_ = []
 
+        if sampling_val is not None:
+            assert y_val is not None
+
         eval_y_pred = (
             self._as_training_tensor(sampling_val(), y)
             if sampling_val is not None
             else sampling()
         )
-        if sampling_val is not None:
-            assert y_val is not None
+        y_val = y if sampling_val is None else y_val
         for step in range(max_iter):
-            optimizer.zero_grad()
-            y_pred = self._as_training_tensor(sampling(), y)
-            loss = self._loss(y, y_pred, G, d)
-            loss.backward()
-            optimizer.step()
+            if batch_size is None:
+                y_pred = self._as_training_tensor(sampling(), y)
+                optimizer.zero_grad()
+                loss = self._loss(y, y_pred, G, d)
+                loss.backward()
+                optimizer.step()
+                loss_item = loss.detach().item()
+            else:
+                perm = torch.randperm(y.shape[0], generator=generator)
+                loss_item = 0.0
+                for start in range(0, y.shape[0], batch_size):
+                    batch_indices = perm[start : start + batch_size]
+                    batch_y = y[batch_indices]
+                    batch_y_pred = sampling(batch_indices)
+                    optimizer.zero_grad()
+                    loss = self._loss(batch_y, batch_y_pred, G, d)
+                    loss_item += loss.detach().item()
+                    loss.backward()
+                    optimizer.step()
+                loss_item = loss_item / len(range(0, y.shape[0], batch_size))
             param_groups = getattr(optimizer, "param_groups", None)
             if param_groups is not None:
                 if lr_decay < 1:
@@ -131,7 +150,7 @@ class QOptRec:
                 current_pinball_loss = self._pinball_loss(
                     y_val, eval_y_pred, G, d
                 ).item()
-                self.smooth_loss_history_.append(loss.detach().item())
+                self.smooth_loss_history_.append(loss_item)
                 self.pinball_loss_history_.append(current_pinball_loss)
                 if current_pinball_loss < best_pinball_loss:
                     best_pinball_loss = current_pinball_loss

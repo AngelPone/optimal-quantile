@@ -44,6 +44,7 @@ for alpha in ALPHAs:
                 "Base forecast windows and true-y windows are not aligned: "
                 f"{len(input_base)} != {test_windows.shape[0]}."
             )
+
         if len(input_base) != expected_windows:
             raise ValueError(
                 "Configured train/test split does not match available windows: "

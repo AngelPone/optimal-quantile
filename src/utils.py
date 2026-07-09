@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 import numpy as np
 import torch
-from torch.distributions import StudentT
+from torch.distributions import StudentT, Normal
 from torch.optim import LBFGS
 from scipy.special import stdtrit
 
@@ -96,6 +96,19 @@ class ExpandingWindowIterator:
         return slice(0, split), slice(split, split + self.h)
 
 
+class FixedWindowIterator(ExpandingWindowIterator):
+    def get_slices(self, idx):
+        if not isinstance(idx, int):
+            raise TypeError("idx must be an integer.")
+
+        if idx < 0:
+            idx += len(self)
+        if idx < 0 or idx >= len(self):
+            raise IndexError("expanding-window index out of range.")
+        split = self.S + idx
+        return slice(idx, split), slice(split, split + self.h)
+
+
 def expanding_window(
     T: int,
     S: int,
@@ -104,6 +117,97 @@ def expanding_window(
 ) -> ExpandingWindowIterator:
     """Create an expanding-window iterator."""
     return ExpandingWindowIterator(T=T, S=S, h=h, dataset=dataset)
+
+
+@dataclass(slots=["xi", "loc", "scale"])
+class SkewNormal:
+
+    xi: torch.Tensor | float
+    loc: torch.Tensor | float = 0.0
+    scale: torch.Tensor | float = 1.0
+
+    def __post_init__(self):
+        self.xi = torch.as_tensor(self.xi)
+        self.loc = torch.as_tensor(self.loc, dtype=self.xi.dtype)
+        self.scale = torch.as_tensor(self.scale, dtype=self.xi.dtype)
+        if torch.any(self.scale < 0):
+            raise ValueError("scale must be positive")
+
+    def prob(self, x: torch.Tensor):
+        return torch.exp(self.log_prob(x))
+
+    def sample(self, size: tuple, generator: torch.Generator | None = None):
+        unif = torch.rand(
+            size,
+            dtype=self.loc.dtype,
+            device=self.loc.device,
+            generator=generator,
+        )
+        eps = max(torch.finfo(unif.dtype).eps, 1e-12)
+        unif = unif.clamp(eps, 1 - eps)
+        return self.q(unif)
+
+    def moments(self):
+        xi = self.xi
+        M1 = torch.sqrt(
+            torch.as_tensor(2.0 / torch.pi, dtype=xi.dtype, device=xi.device)
+        )
+        M2 = torch.as_tensor(1.0, dtype=xi.dtype, device=xi.device)
+        mu_xi = M1 * (xi - 1 / xi)
+        var_xi = (M2 - M1**2) * (xi**2 + xi ** (-2)) + 2 * M1**2 - M2
+        sigma_xi = torch.sqrt(var_xi)
+        return mu_xi, sigma_xi
+
+    def log_prob(
+        self,
+        x: torch.Tensor,
+    ):
+        z = (x - self.loc) / self.scale
+        base_dist = Normal(loc=0.0, scale=1.0)
+        mu_xi, sigma_xi = self.moments()
+        s = sigma_xi * z + mu_xi
+        # Piecewise argument of the underlying symmetric Student-t density
+        arg = torch.where(s < 0, self.xi * s, s / self.xi)
+        log_norm = torch.log(
+            torch.as_tensor(2.0, dtype=x.dtype, device=x.device)
+        ) - torch.log(self.xi + 1 / self.xi)
+        log_density = (
+            -torch.log(self.scale)
+            + torch.log(sigma_xi)
+            + log_norm
+            + base_dist.log_prob(arg)
+        )
+        return log_density
+
+    def q(self, p: torch.Tensor):
+        """
+        Quantile function.
+
+        p should be in (0, 1).
+        """
+        p = torch.as_tensor(p, dtype=self.loc.dtype, device=self.loc.device)
+
+        eps = max(torch.finfo(p.dtype).eps, 1e-12)
+        p = p.clamp(eps, 1 - eps)
+
+        mu_xi, sigma_xi = self.moments()
+
+        threshold = 1 / (1 + self.xi**2)
+        left_prob = p * (1 + self.xi**2) / 2
+        right_prob = (p * (1 + self.xi**2) + self.xi**2 - 1) / (2 * self.xi**2)
+        # Standard normal inverse CDF:
+        # Phi^{-1}(u) = sqrt(2) * erfinv(2u - 1)
+        sqrt2 = torch.sqrt(torch.as_tensor(2.0, dtype=p.dtype, device=p.device))
+        left_arg = sqrt2 * torch.erfinv(2 * left_prob - 1)
+        right_arg = sqrt2 * torch.erfinv(2 * right_prob - 1)
+
+        arg = torch.where(
+            p < threshold,
+            left_arg / self.xi,
+            self.xi * right_arg,
+        )
+
+        return self.loc + self.scale * (arg - mu_xi) / sigma_xi
 
 
 @dataclass(slots=["xi", "df", "loc", "scale"])
@@ -245,3 +349,56 @@ def mle_estimation_skewed_dist(
         xi = torch.as_tensor(3.0, dtype=dtype)
 
     return SkewStudentT(xi, df, x_mean, x_sd)
+
+
+def mle_estimation_skewed_normal(
+    samples: np.ndarray, trace: bool = False, max_iter: int = 10
+):
+    dtype = torch.float64
+
+    x = torch.as_tensor(samples, dtype=dtype)
+
+    # plug-in standardization of the data
+    x_mean = x.mean()
+    x_sd = x.std(correction=0)
+    z = (x - x_mean) / x_sd
+    eta = torch.tensor(0.0, dtype=dtype, requires_grad=True)
+
+    optimizer = LBFGS(
+        params=[eta],
+        lr=0.5,
+        max_iter=100,
+        line_search_fn="strong_wolfe",
+    )
+
+    def nll():
+        xi = torch.exp(eta)
+        dist = SkewNormal(xi)
+        return dist.log_prob(z).negative().sum()
+
+    def closure():
+        optimizer.zero_grad()
+        loss = nll()
+        loss.backward()
+        return loss
+
+    for _ in range(max_iter):
+
+        optimizer.step(closure)
+
+        if trace:
+            with torch.no_grad():
+                xi = torch.exp(eta)
+                current_loss = nll().item()
+                mu_xi, sigma_xi = SkewNormal.moments(xi.detach(), df)
+                print(f"NLL: {current_loss:.6f}")
+                print(f"xi: {xi.item():.6f}")
+                print(f"mu_xi: {mu_xi.item():.6f}")
+                print(f"sigma_xi: {sigma_xi.item():.6f}")
+
+    xi = torch.exp(eta.detach())
+    # stablize the estimation of xi
+    if torch.all(xi > 3):
+        xi = torch.as_tensor(3.0, dtype=dtype)
+
+    return SkewNormal(xi, x_mean, x_sd)
