@@ -88,8 +88,8 @@ for idx, alpha in enumerate(ALPHAs):
                 )
             return (mean[smp_slice, :, None] + smps) / 1000
 
-        train_slice = all_slice[:-28]
-        val_slice = all_slice[-28:]
+        train_slice = all_slice[: -28 * 2]
+        val_slice = all_slice[-28 * 2 :]
         model_normal = QOptRec(A, alpha=alpha, beta=BETA, optimizer_kwargs={"lr": LR})
 
         def select_source(source_indices, local_indices):
