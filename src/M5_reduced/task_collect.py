@@ -63,7 +63,7 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
         base: Annotated[dict, data_catalog["base"]],
         input_rf: Annotated[dict, rf],
         data_path: Path = DATA_OUTPUT_PATH,
-        output: Annotated[Path, Product] = TABLES_PATH / f"M5_acc_{dist}.tex",
+        output: Annotated[Path, Product] = TABLES_PATH / f"M5_reduced_acc_{dist}.tex",
         dist: str = dist,
         seed: int = seed,
     ):
@@ -155,6 +155,14 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
 
 
 if __name__ == "__main__":
-    base = data_catalog["base"].load()
-    rf = {alpha: data_catalog[f"rf_{alpha}_{dist}"].load() for alpha in ALPHAs}
-    task_collect(base, rf, dist="normal")
+    for idx, dist in enumerate(["normal", "skewnormal"]):
+        seed = 20260706 + int(idx * 2000)
+        base = data_catalog["base"].load()
+        rf = {alpha: data_catalog[f"rf_{alpha}_{dist}"].load() for alpha in ALPHAs}
+        task_collect(
+            base,
+            rf,
+            dist=dist,
+            seed=seed,
+            output=TABLES_PATH / f"M5_reduced_acc_{dist}.tex",
+        )
