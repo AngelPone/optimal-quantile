@@ -12,8 +12,8 @@ FORECAST_HORIZON = 28
 WINDOW_S = 52 * 7 * 3
 
 ALPHAs = [0.005, 0.025, 0.165, 0.25, 0.5, 0.75, 0.835, 0.975, 0.995]
-SAMPLE_SIZE = 100
+SAMPLE_SIZE = 200
 OUTPUT_SAMPLE_SIZE = 10000
-LR = 0.005
-BETA = 50
+LR = 0.002
+BETA = 100
 data_catalog = DataCatalog(name="M5_reduced")

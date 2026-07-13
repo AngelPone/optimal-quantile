@@ -131,6 +131,7 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
 
             for alpha in ALPHAs:
                 G, d = input_rf[alpha]["result"]
+                d = d[:, 0]
                 rf_samples = (
                     torch.einsum("tnj,kn->tkj", smps, S @ G)
                     + (S @ d * 1000)[None, :, None]

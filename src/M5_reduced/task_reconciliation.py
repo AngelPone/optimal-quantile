@@ -25,7 +25,7 @@ for idx, alpha in enumerate(ALPHAs):
         data_path: Path = DATA_OUTPUT_PATH,
         output_skew: Annotated[dict, Product] = data_catalog[f"rf_{alpha}_skewnormal"],
         output_normal: Annotated[dict, Product] = data_catalog[f"rf_{alpha}_normal"],
-        alpha: float = alpha,
+        alpha: float = [alpha],
         seed: int = seed,
     ) -> None:
 
@@ -88,8 +88,8 @@ for idx, alpha in enumerate(ALPHAs):
                 )
             return (mean[smp_slice, :, None] + smps) / 1000
 
-        train_slice = all_slice[: -28 * 2]
-        val_slice = all_slice[-28 * 2 :]
+        train_slice = all_slice[:-28]
+        val_slice = all_slice[-28:]
         model_normal = QOptRec(A, alpha=alpha, beta=BETA, optimizer_kwargs={"lr": LR})
 
         def select_source(source_indices, local_indices):
@@ -111,7 +111,6 @@ for idx, alpha in enumerate(ALPHAs):
             generator=generator,
             sampling_val=val_sampling,
             y_val=true_y[val_slice] / 1000,
-            batch_size=128,
         )
         output_normal.save({"mdl": model_normal, "result": (G, d)})
 
@@ -130,7 +129,10 @@ for idx, alpha in enumerate(ALPHAs):
             generator=generator,
             sampling_val=val_sampling,
             y_val=true_y[val_slice] / 1000,
-            batch_size=128,
         )
         output_skew.save({"mdl": model_skew, "result": (G, d)})
         return
+
+
+if __name__ == "__main__":
+    task_perform_reconciliation(base=data_catalog["base"].load(), seed=seed)
