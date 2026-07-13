@@ -49,40 +49,70 @@ def solve_approx_pinball_loss(
 
 class ApproxPinballLoss(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, S, G, y, alpha, beta):
+    def forward(ctx, S, rf, y, alpha, beta):
         with torch.no_grad():
-            samples = torch.einsum("tnj,mn->tmj", y, S @ G)
-            z = solve_approx_pinball_loss(samples, alpha, beta)
-            ctx.alpha = alpha
+            z = solve_approx_pinball_loss(rf, alpha, beta)
             ctx.beta = beta
-            ctx.save_for_backward(z, S, G, y)
+            ctx.save_for_backward(z, S, rf, y)
         return z
 
     @staticmethod
     def backward(ctx, grad_output):
-        z, S, G, y = ctx.saved_tensors
+        z, S, rf, y = ctx.saved_tensors
+        m, n = S.shape
         beta = ctx.beta
-        rf = torch.einsum("tnj,mn->tmj", y, S @ G)
         loss = beta * (rf - z[:, :, None])
-        divide = torch.sigmoid(loss) * torch.sigmoid(-loss)
+        p = torch.sigmoid(loss)
+        divide = p * (1 - p)
         left = divide.mean(dim=2)
-        right = torch.einsum("km,tnj->tkmnj", S, y)
-        right = torch.einsum("tnj,tnabj->tnabj", divide, right)
-        right = right.mean(dim=(4))
-        grad = right / left[:, :, None, None]
-        grad = torch.einsum("tk,tkab->ab", grad_output, grad)
-        return None, grad, None, None, None
+
+        def logic1():
+            right = torch.einsum("km,tnj->tkmnj", S, y)
+            right = torch.einsum("tnj,tnabj->tnabj", divide, right)
+            right = right.mean(dim=(4))
+            grad = right / left[:, :, None, None]
+            grad = torch.einsum("tk,tkab->ab", grad_output, grad)
+            return grad
+
+        def logic2():
+            weight = grad_output / left
+            core = (
+                torch.einsum(
+                    "tk,tkj,tnj->kn",
+                    weight,
+                    divide,
+                    y,
+                )
+                / y.shape[-1]
+            )
+            grad = S.T @ core
+            return grad
+
+        def logic3():
+            weight = grad_output / left
+            grad = (
+                torch.einsum(
+                    "km,tk,tkj,tnj->mn",
+                    S,
+                    weight,
+                    divide,
+                    y,
+                )
+                / y.shape[-1]
+            )
+            return grad
+
+        grad = logic2() if m > n // 2 else logic3()
+
+        return None, grad, None, None, None, None
 
 
 if __name__ == "__main__":
     S = torch.Tensor([[1, 1], [0.0, 1.0]])
     G = torch.rand((2, 3), requires_grad=True)
     y = torch.rand((5, 3, 100))
-    rf = torch.einsum("tnj,kn->tkj", y, S @ G)
 
     q = ApproxPinballLoss.apply(S, G, y, 0.95, 20)
-    print(
-        f"estimated quantile: {q.detach().numpy()}, true quantile: {torch.quantile(rf, 0.95, dim=2).detach().numpy()}"
-    )
+
     q.mean().backward()
     print(G.grad)

@@ -11,13 +11,12 @@ class QOptRec:
     def __init__(
         self,
         A: torch.Tensor,
-        alpha: float,
+        alpha: list[float],
         beta: float,
         optimizer_cls=torch.optim.Adam,
         optimizer_kwargs=None,
     ):
         self.A = A
-        assert 0 < alpha < 1
         self.alpha = alpha
         assert beta > 0
         self.beta = beta
@@ -41,21 +40,29 @@ class QOptRec:
     def _loss(
         self, y: torch.Tensor, y_pred: torch.Tensor, G: torch.Tensor, d: torch.Tensor
     ):
-        q = self._quantile(y_pred, G, d)
-        loss = approx_pinball_loss(y - q, self.beta, self.alpha)
-        return loss
-
-    def _quantile(self, y_pred: torch.Tensor, G: torch.Tensor, d: torch.Tensor):
+        loss = torch.tensor(0.0)
         S = self.S.to(dtype=G.dtype, device=G.device)
-        q = ApproxPinballLoss.apply(S, G, y_pred, self.alpha, self.beta)
-        bias = d @ S.T
-        return bias[None, :] + q
+        bias = torch.einsum("mk,nm->nk", d, S)
+        with torch.no_grad():
+            rf = torch.einsum("tnj,kn->tkj", y_pred, S @ G)
+        for idx, alpha in enumerate(self.alpha):
+            q = ApproxPinballLoss.apply(S, rf, y_pred, alpha, self.beta)
+            y = bias[:, idx][None, :] + q
+            loss += approx_pinball_loss(y - q, self.beta, alpha)
+        return loss
 
     def _pinball_loss(
         self, y: torch.Tensor, y_pred: torch.Tensor, G: torch.Tensor, d: torch.Tensor
     ):
-        q = self._quantile(y_pred, G, d)
-        return pinball_loss(y - q, self.alpha)
+        loss = torch.tensor(0.0)
+        S = self.S.to(dtype=G.dtype, device=G.device)
+        bias = torch.einsum("mk,nm->nk", d, S)
+        rf = torch.einsum("tnj,kn->tkj", y_pred, self.S @ G)
+        for idx, alpha in enumerate(self.alpha):
+            q = ApproxPinballLoss.apply(S, rf, y_pred, alpha, self.beta)
+            y = bias[:, idx][None, :] + q
+            loss += pinball_loss(y - q, alpha)
+        return loss
 
     @staticmethod
     def _as_training_tensor(value, y: torch.Tensor):
@@ -99,7 +106,12 @@ class QOptRec:
                 dtype=y.dtype,
                 device=y.device,
             ).requires_grad_()
-        d = torch.zeros((self.m), requires_grad=True, dtype=y.dtype, device=y.device)
+        d = torch.zeros(
+            (self.m, len(self.alpha)),
+            requires_grad=True,
+            dtype=y.dtype,
+            device=y.device,
+        )
         optimizer_kwargs = self.optimizer_kwargs or {}
         optimizer = self.optimizer_cls(params=[G, d], **optimizer_kwargs)
 
