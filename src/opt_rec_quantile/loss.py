@@ -49,7 +49,7 @@ def solve_approx_pinball_loss(
 
 class ApproxPinballLoss(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, S, rf, y, alpha, beta):
+    def forward(ctx, S, G, rf, y, alpha, beta):
         with torch.no_grad():
             z = solve_approx_pinball_loss(rf, alpha, beta)
             ctx.beta = beta

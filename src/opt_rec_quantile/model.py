@@ -46,8 +46,9 @@ class QOptRec:
         with torch.no_grad():
             rf = torch.einsum("tnj,kn->tkj", y_pred, S @ G)
         for idx, alpha in enumerate(self.alpha):
-            q = ApproxPinballLoss.apply(S, rf, y_pred, alpha, self.beta)
-            y = bias[:, idx][None, :] + q
+            q = bias[:, idx][None, :] + ApproxPinballLoss.apply(
+                S, G, rf, y_pred, alpha, self.beta
+            )
             loss += approx_pinball_loss(y - q, self.beta, alpha)
         return loss
 
@@ -59,8 +60,9 @@ class QOptRec:
         bias = torch.einsum("mk,nm->nk", d, S)
         rf = torch.einsum("tnj,kn->tkj", y_pred, self.S @ G)
         for idx, alpha in enumerate(self.alpha):
-            q = ApproxPinballLoss.apply(S, rf, y_pred, alpha, self.beta)
-            y = bias[:, idx][None, :] + q
+            q = bias[:, idx][None, :] + ApproxPinballLoss.apply(
+                S, G, rf, y_pred, alpha, self.beta
+            )
             loss += pinball_loss(y - q, alpha)
         return loss
 
