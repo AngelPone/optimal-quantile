@@ -27,11 +27,14 @@ class LevelSpec:
 
 LEVEL_SPECS = (
     LevelSpec("level1", "Total", ()),
-    LevelSpec("level2", "State", ("state_id",)),
-    LevelSpec("level3", "Store", ("store_id",)),
     LevelSpec("level4", "Category", ("cat_id",)),
-    LevelSpec("level6", "State*Category", ("state_id", "cat_id")),
-    LevelSpec("level8", "Store*Category", ("store_id", "cat_id")),
+    LevelSpec("level5", "Department", ("dept_id",)),
+    LevelSpec("level2", "State", ("state_id",)),
+    LevelSpec("level7", "Department State", ("state_id", "dept_id")),
+    LevelSpec("level6", "Category State", ("state_id", "cat_id")),
+    LevelSpec("level3", "Store", ("store_id",)),
+    LevelSpec("level8", "Category Store", ("store_id", "cat_id")),
+    LevelSpec("level9", "Department Store", ("store_id", "dept_id")),
 )
 BASE_LEVEL = LEVEL_SPECS[-1]
 

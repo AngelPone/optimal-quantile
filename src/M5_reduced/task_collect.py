@@ -11,59 +11,57 @@ from M5_reduced.config import (
     OUTPUT_SAMPLE_SIZE,
     TABLES_PATH,
     DATA_OUTPUT_PATH,
+    BETAs,
 )
 from pytask import task, Product
 from pathlib import Path
 from opt_rec_quantile.loss import pinball_loss
 
 
-def benchmarks(samples, A, resids):
-    A = np.array(A)
-    resids = np.array(resids)
-    A = np.array(A)
+def benchmarks(samples, A, resids, alpha):
+    A = A.numpy()
     params = cstools(agg_mat=A)
     olss = []
     wlss = []
     shrs = []
     sams = []
+    resids[np.abs(resids) > 10000] = resids.mean()
+    resids_demean = resids - resids.mean(axis=0)[None, :]
     for i in range(samples.shape[0]):
-        ols = csrec(np.array(samples[i, :, :].T), params=params, res=resids)
+        smps = samples[i, :, :].T.numpy()
+        ols = csrec(smps, params=params, res=resids_demean, comb="ols")
         olss.append(ols.T)
-        wls = csrec(np.array(samples[i, :, :].T), params=params, res=resids, comb="wls")
+        wls = csrec(smps, params=params, res=resids_demean, comb="wls")
         wlss.append(wls.T)
-        shr = csrec(
-            np.array(samples[i, :, :].T),
-            params=params,
-            res=resids,
-            comb="shr",
-        )
+        shr = csrec(smps, params=params, res=resids_demean, comb="shr")
         shrs.append(shr.T)
-        sam = csrec(
-            np.array(samples[i, :, :].T),
-            params=params,
-            res=resids,
-            comb="sam",
-        )
+        sam = csrec(smps, params=params, res=resids_demean, comb="sam")
         sams.append(sam.T)
-    return {
-        "ols": torch.as_tensor(np.stack(olss)),
-        "wls": torch.as_tensor(np.stack(wlss)),
-        "shr": torch.as_tensor(np.stack(shrs)),
-        "sam": torch.as_tensor(np.stack(sams)),
-    }
+    return [
+        {
+            "ols": torch.as_tensor(np.quantile(np.stack(olss), q=alpha, axis=2)),
+            "wls": torch.as_tensor(np.quantile(np.stack(wlss), q=alpha, axis=2)),
+            "shr": torch.as_tensor(np.quantile(np.stack(shrs), q=alpha, axis=2)),
+            "sam": torch.as_tensor(np.quantile(np.stack(sams), q=alpha, axis=2)),
+        }
+        for alpha in alpha
+    ]
 
 
 for idx, dist in enumerate(["normal", "skewnormal"]):
-    seed = 20260706 + int(idx * 2000)
-
-    rf = {alpha: data_catalog[f"rf_{alpha}_{dist}"] for alpha in ALPHAs}
+    seed = 20260720 + idx
+    rf = [
+        {alpha: data_catalog[f"rf_{alpha}_{beta}_{dist}"] for alpha in ALPHAs}
+        for beta in BETAs
+    ]
 
     @task
     def task_collect(
         base: Annotated[dict, data_catalog["base"]],
         input_rf: Annotated[dict, rf],
         data_path: Path = DATA_OUTPUT_PATH,
-        output: Annotated[Path, Product] = TABLES_PATH / f"M5_reduced_acc_{dist}.tex",
+        output: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}.tex",
+        output_df: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}.csv",
         dist: str = dist,
         seed: int = seed,
     ):
@@ -116,7 +114,18 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
 
         test_slice = range(len(base) - 1, len(base))
         resids = base[-1]["resid"]
-        output_dict = {"method": [], "loss": [], "alpha": [], "h": []}
+        output_dict = {
+            "method": [],
+            "loss": [],
+            "alpha": [],
+            "h": [],
+            "series_code": [],
+        }
+
+        hist = base[0]["hist"]
+        hist = np.concat([hist, np.stack([i["future"][0,] for i in base[:-1]])])
+        mod = [np.abs(np.diff(hist[:, i])).mean() for i in range(hist.shape[1])]
+
         for h in range(1, 29):
             mean = torch.stack([i["mean"][:, h - 1] for i in base])
             true_y = torch.as_tensor(
@@ -125,45 +134,58 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
                 device=mean.device,
             )
             smps = sampling(dist, test_slice)
-            res = benchmarks(smps, A, resids)
+            res = benchmarks(smps, A, resids, ALPHAs)
 
-            res["base"] = smps
-
-            for alpha in ALPHAs:
-                G, d = input_rf[alpha]["result"]
-                d = d[:, 0]
-                rf_samples = (
-                    torch.einsum("tnj,kn->tkj", smps, S @ G)
-                    + (S @ d * 1000)[None, :, None]
-                )
-                res["QOpt"] = rf_samples
-                for method, smp in res.items():
-                    q = torch.quantile(smp, alpha, dim=2)
-                    loss = (
-                        pinball_loss(true_y[test_slice] - q, alpha=alpha)
-                        .detach()
-                        .item()
+            for alpha_idx, alpha in enumerate(ALPHAs):
+                res[alpha_idx]["base"] = torch.quantile(smps, q=alpha, dim=2)
+                for idx, beta in enumerate(BETAs):
+                    G, d = input_rf[idx][alpha]["result"]
+                    d = d[:, 0]
+                    rf_samples = (
+                        torch.einsum("tnj,kn->tkj", smps, S @ G)
+                        + (S @ d * 1000)[None, :, None]
                     )
-                    output_dict["method"].append(method)
-                    output_dict["alpha"].append(alpha)
-                    output_dict["loss"].append(loss)
-                    output_dict["h"].append(h)
+                    q = torch.quantile(rf_samples, alpha, dim=2)
+                    res[alpha_idx][f"QOpt($\\beta={beta}$)"] = q
+                for method, q in res[alpha_idx].items():
+                    loss = [
+                        (
+                            pinball_loss(true_y[test_slice, i] - q[0, i], alpha=alpha)
+                            .detach()
+                            .item()
+                            / mod[i]
+                        )
+                        for i in range(q.numel())
+                    ]
+                    for i in range(len(loss)):
+                        output_dict["method"].append(method)
+                        output_dict["alpha"].append(alpha)
+                        output_dict["loss"].append(loss[i])
+                        output_dict["h"].append(h)
+                        output_dict["series_code"].append(i)
         df = pd.DataFrame(output_dict)
+        df.to_csv(output_df)
         df = df.groupby(["method", "alpha"]).mean()["loss"].reset_index()
         df = df.pivot(index="method", columns="alpha", values="loss")
-        df.columns = [f"{i:.2f}" for i in df.columns]
-        output.write_text(df.to_latex(float_format="%.2f", label=" ", caption="M5"))
+        df.columns = [f"{i:.3f}" for i in df.columns]
+        output.write_text(df.to_latex(float_format="%.3f", label=" ", caption="M5"))
 
 
 if __name__ == "__main__":
     for idx, dist in enumerate(["normal", "skewnormal"]):
-        seed = 20260706 + int(idx * 2000)
+        seed = 20260720 + idx
+        rf = [
+            {
+                alpha: data_catalog[f"rf_{alpha}_{beta}_{dist}"].load()
+                for alpha in ALPHAs
+            }
+            for beta in BETAs
+        ]
         base = data_catalog["base"].load()
-        rf = {alpha: data_catalog[f"rf_{alpha}_{dist}"].load() for alpha in ALPHAs}
         task_collect(
             base,
             rf,
             dist=dist,
             seed=seed,
-            output=TABLES_PATH / f"M5_reduced_acc_{dist}.tex",
+            output=TABLES_PATH / f"M5_ets_{dist}.tex",
         )

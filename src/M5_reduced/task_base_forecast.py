@@ -39,7 +39,7 @@ def task_base_forecast(
             mdl = AutoETS(season_length=7)
             mdl.fit(train, X_train)
             fcasts = mdl.predict(h=FORECAST_HORIZON, X=X_pred)["mean"]
-            resid = mdl.model_["residuals"]
+            resid = train - mdl.predict_in_sample()["fitted"]
             dist = mle_estimation_skewed_normal(resid)
             normal = torch.distributions.Normal(resid.mean(), resid.std())
             mean.append(fcasts)
