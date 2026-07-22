@@ -38,7 +38,12 @@ class QOptRec:
         )
 
     def _loss(
-        self, y: torch.Tensor, y_pred: torch.Tensor, G: torch.Tensor, d: torch.Tensor
+        self,
+        y: torch.Tensor,
+        y_pred: torch.Tensor,
+        G: torch.Tensor,
+        d: torch.Tensor,
+        weights: torch.Tensor | None,
     ):
         loss = torch.tensor(0.0)
         S = self.S.to(dtype=G.dtype, device=G.device)
@@ -49,11 +54,16 @@ class QOptRec:
             q = bias[:, idx][None, :] + ApproxPinballLoss.apply(
                 S, G, rf, y_pred, alpha, self.beta
             )
-            loss += approx_pinball_loss(y - q, self.beta, alpha)
+            loss += approx_pinball_loss(y - q, self.beta, alpha, weights)
         return loss
 
     def _pinball_loss(
-        self, y: torch.Tensor, y_pred: torch.Tensor, G: torch.Tensor, d: torch.Tensor
+        self,
+        y: torch.Tensor,
+        y_pred: torch.Tensor,
+        G: torch.Tensor,
+        d: torch.Tensor,
+        weights: torch.Tensor | None = None,
     ):
         loss = torch.tensor(0.0)
         S = self.S.to(dtype=G.dtype, device=G.device)
@@ -63,7 +73,7 @@ class QOptRec:
             q = bias[:, idx][None, :] + ApproxPinballLoss.apply(
                 S, G, rf, y_pred, alpha, self.beta
             )
-            loss += pinball_loss(y - q, alpha)
+            loss += pinball_loss(y - q, alpha, weights)
         return loss
 
     @staticmethod
@@ -77,6 +87,7 @@ class QOptRec:
         y: torch.Tensor,
         sampling: Callable[[], torch.Tensor],
         G: torch.Tensor | str = "ols",
+        weights: torch.Tensor | None = None,
         generator: torch.Generator | None = None,
         max_iter: int = 200,
         lr_decay: float = 1.0,
@@ -137,7 +148,7 @@ class QOptRec:
             if batch_size is None:
                 y_pred = self._as_training_tensor(sampling(), y)
                 optimizer.zero_grad()
-                loss = self._loss(y, y_pred, G, d)
+                loss = self._loss(y, y_pred, G, d, weights)
                 loss.backward()
                 optimizer.step()
                 loss_item = loss.detach().item()
@@ -149,7 +160,7 @@ class QOptRec:
                     batch_y = y[batch_indices]
                     batch_y_pred = sampling(batch_indices)
                     optimizer.zero_grad()
-                    loss = self._loss(batch_y, batch_y_pred, G, d)
+                    loss = self._loss(batch_y, batch_y_pred, G, d, weights)
                     loss_item += loss.detach().item()
                     loss.backward()
                     optimizer.step()
@@ -162,7 +173,7 @@ class QOptRec:
 
             with torch.no_grad():
                 current_pinball_loss = self._pinball_loss(
-                    y_val, eval_y_pred, G, d
+                    y_val, eval_y_pred, G, d, weights
                 ).item()
                 self.smooth_loss_history_.append(loss_item)
                 self.pinball_loss_history_.append(current_pinball_loss)

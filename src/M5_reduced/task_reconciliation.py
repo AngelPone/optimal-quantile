@@ -17,9 +17,10 @@ import pickle as pkl
 from pathlib import Path
 
 LR = 0.0005
-SAMPLE_SIZE = 300
-VAL_SAMPLE_SIZE = 3000
+SAMPLE_SIZE = 100
+VAL_SAMPLE_SIZE = 1000
 MAX_ITER = 100
+VERSION = 20260723
 
 for alpha in ALPHAs:
     for idx, dist in enumerate(["skewnormal", "normal"]):
@@ -45,15 +46,21 @@ for alpha in ALPHAs:
                     handlers=[
                         logging.FileHandler(
                             LOGGING_PATH
-                            / f"M5_ets_LR{int(LR*1000)}_SMP{SAMPLE_SIZE}.log"
+                            / f"M5_ets_LR{int(LR*10000)}_SMP{SAMPLE_SIZE}_{VERSION}.log"
                         )
                     ],
                     force=True,
                 )
 
-                logging.info("=============================================")
-                logging.info(f"===alpha={alpha} dist={dist} beta={beta}====")
-                logging.info("=============================================")
+                logging.info(
+                    "============================================================================"
+                )
+                logging.info(
+                    f"alpha={alpha} dist={dist} beta={beta} SMP={SAMPLE_SIZE} VAL_SMP={VAL_SAMPLE_SIZE} LR={LR} OPTIM=Adam"
+                )
+                logging.info(
+                    "==========================================================================="
+                )
                 with open(data_path, "rb") as f:
                     data = pkl.load(f)
 
@@ -119,10 +126,20 @@ for alpha in ALPHAs:
                         )
                     return mean[smp_slice, :, None] + smps
 
+                hist = base[0]["hist"]
+                hist = np.concat([hist, np.stack([i["future"][0,] for i in base[:-1]])])
+                weights = np.array(
+                    [np.abs(np.diff(hist[:, i])).mean() for i in range(hist.shape[1])]
+                )
+                weights = torch.as_tensor(weights, dtype=true_y.dtype)
                 train_slice = all_slice[:-28]
                 val_slice = all_slice[-28:]
                 model_normal = QOptRec(
-                    A, alpha=alpha, beta=beta, optimizer_kwargs={"lr": LR}
+                    A,
+                    alpha=alpha,
+                    beta=beta,
+                    optimizer_kwargs={"lr": LR},
+                    optimizer_cls=torch.optim.Adam,
                 )
 
                 def select_source(source_indices, local_indices):
@@ -153,6 +170,7 @@ for alpha in ALPHAs:
                     true_y[train_slice],
                     train_sampling,
                     G=shr_mat,
+                    weights=weights,
                     generator=generator,
                     sampling_val=val_sampling,
                     y_val=true_y[val_slice],
@@ -162,5 +180,8 @@ for alpha in ALPHAs:
 
                 return
 
-        if __name__ == "__main__":
-            task_perform_reconciliation(base=data_catalog["base"].load(), seed=seed)
+
+if __name__ == "__main__":
+    task_perform_reconciliation(
+        base=data_catalog["base"].load(), seed=3, dist="normal", alpha=[0.005], beta=100
+    )

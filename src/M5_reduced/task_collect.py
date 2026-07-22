@@ -12,6 +12,7 @@ from M5_reduced.config import (
     TABLES_PATH,
     DATA_OUTPUT_PATH,
     BETAs,
+    LOGGING_PATH,
 )
 from pytask import task, Product
 from pathlib import Path
@@ -61,7 +62,7 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
         input_rf: Annotated[dict, rf],
         data_path: Path = DATA_OUTPUT_PATH,
         output: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}.tex",
-        output_df: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}.csv",
+        output_df: Annotated[Path, Product] = LOGGING_PATH / f"M5_ets_{dist}.csv",
         dist: str = dist,
         seed: int = seed,
     ):

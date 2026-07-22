@@ -3,12 +3,24 @@ import cvxpy as cp
 import warnings
 
 
-def approx_pinball_loss(x: torch.Tensor, beta: float, alpha: float):
-    return torch.mean(torch.nn.functional.softplus(-x, beta=beta) + alpha * x)
+def approx_pinball_loss(
+    x: torch.Tensor, beta: float, alpha: float, weights: torch.Tensor | None = None
+):
+    if weights is None:
+        return torch.mean(torch.nn.functional.softplus(-x, beta=beta) + alpha * x)
+    else:
+        loss = torch.nn.functional.softplus(-x, beta=beta) + alpha * x
+        loss = loss.mean(dim=0) / weights
+        return loss.mean()
 
 
-def pinball_loss(x: torch.Tensor, alpha: float):
-    return torch.mean(torch.where(x < 0, -(1 - alpha) * x, alpha * x))
+def pinball_loss(x: torch.Tensor, alpha: float, weights: torch.Tensor | None = None):
+    if weights is None:
+        return torch.mean(torch.where(x < 0, -(1 - alpha) * x, alpha * x))
+    else:
+        loss = torch.where(x < 0, -(1 - alpha) * x, alpha * x)
+        loss = loss.mean(dim=0) / weights
+        return loss.mean()
 
 
 def solve_approx_pinball_loss(
