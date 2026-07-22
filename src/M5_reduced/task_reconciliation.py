@@ -5,7 +5,9 @@ from M5_reduced.config import (
     ALPHAs,
     DATA_OUTPUT_PATH,
     BETAs,
+    LOGGING_PATH,
 )
+import logging
 from forecopy import cscov, cstools
 from opt_rec_quantile.model import QOptRec
 
@@ -14,8 +16,10 @@ import numpy as np
 import pickle as pkl
 from pathlib import Path
 
-LR = 0.001
-SAMPLE_SIZE = 100
+LR = 0.0005
+SAMPLE_SIZE = 300
+VAL_SAMPLE_SIZE = 3000
+MAX_ITER = 100
 
 for alpha in ALPHAs:
     for idx, dist in enumerate(["skewnormal", "normal"]):
@@ -31,9 +35,25 @@ for alpha in ALPHAs:
                 ],
                 alpha: float = [alpha],
                 beta: int = beta,
+                dist: str = dist,
                 seed: int = seed,
             ) -> None:
 
+                logging.basicConfig(
+                    level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s",
+                    handlers=[
+                        logging.FileHandler(
+                            LOGGING_PATH
+                            / f"M5_ets_LR{int(LR*1000)}_SMP{SAMPLE_SIZE}.log"
+                        )
+                    ],
+                    force=True,
+                )
+
+                logging.info("=============================================")
+                logging.info(f"===alpha={alpha} dist={dist} beta={beta}====")
+                logging.info("=============================================")
                 with open(data_path, "rb") as f:
                     data = pkl.load(f)
 
@@ -97,7 +117,7 @@ for alpha in ALPHAs:
                                 for i in smp_slice
                             ]
                         )
-                    return (mean[smp_slice, :, None] + smps) / 1000
+                    return mean[smp_slice, :, None] + smps
 
                 train_slice = all_slice[:-28]
                 val_slice = all_slice[-28:]
@@ -116,7 +136,7 @@ for alpha in ALPHAs:
 
                 def val_sampling(local_indices=None):
                     source_indices = select_source(val_slice, local_indices)
-                    return sampling(dist, source_indices, 1000)
+                    return sampling(dist, source_indices, VAL_SAMPLE_SIZE)
 
                 resids = base[-1]["resid"]
                 resids = resids - resids.mean(axis=0)
@@ -130,12 +150,13 @@ for alpha in ALPHAs:
                 shr_mat = torch.linalg.solve(S.T @ W @ S, S.T @ W)
 
                 G, d = model_normal.train(
-                    true_y[train_slice] / 1000,
+                    true_y[train_slice],
                     train_sampling,
                     G=shr_mat,
                     generator=generator,
                     sampling_val=val_sampling,
-                    y_val=true_y[val_slice] / 1000,
+                    y_val=true_y[val_slice],
+                    max_iter=MAX_ITER,
                 )
                 output.save({"mdl": model_normal, "result": (G, d)})
 

@@ -3,6 +3,7 @@ from pytask import DataCatalog
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+LOGGING_PATH = PROJECT_ROOT / "output" / "logs"
 TABLES_PATH = PROJECT_ROOT / "output" / "tables"
 OUTPUT_PATH = PROJECT_ROOT / "output" / "M5_reduced"
 DATA_OUTPUT_PATH = OUTPUT_PATH / "prepared.pkl"

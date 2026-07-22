@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-import math
+import logging
 from opt_rec_quantile.loss import ApproxPinballLoss, approx_pinball_loss, pinball_loss
 from typing import Callable
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -172,7 +172,7 @@ class QOptRec:
                     best_d = d.detach().clone()
             scheduler.step(current_pinball_loss)
 
-            print(
+            logging.info(
                 f"Step {step}: loss: {loss.detach():.4f}, "
                 f"pinball_loss: {current_pinball_loss:.4f}"
             )

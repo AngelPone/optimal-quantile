@@ -143,7 +143,7 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
                     d = d[:, 0]
                     rf_samples = (
                         torch.einsum("tnj,kn->tkj", smps, S @ G)
-                        + (S @ d * 1000)[None, :, None]
+                        + (S @ d)[None, :, None]
                     )
                     q = torch.quantile(rf_samples, alpha, dim=2)
                     res[alpha_idx][f"QOpt($\\beta={beta}$)"] = q
