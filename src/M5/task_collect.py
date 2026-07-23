@@ -12,6 +12,24 @@ from opt_rec_quantile.loss import pinball_loss
 from M5.data_prepare import LEVEL_SPECS, add_derived_keys, make_series_names
 
 
+def style(df, methods):
+    def format_value(x):
+        if x == minimum:
+            return rf"\textbf{{{x:.3f}}}"
+        if second_minimum is not None and x == second_minimum:
+            return rf"\textcolor{{red}}{{{x:.3f}}}"
+        return f"{x:.3f}"
+
+    for col in df.columns:
+        unique_values = df[col].dropna().unique()
+        unique_values.sort()
+        minimum = unique_values[0]
+        second_minimum = unique_values[1] if len(unique_values) > 1 else None
+        df[col] = [format_value(value) for value in df[col]]
+
+    return df.loc[methods].to_latex(escape=False)
+
+
 def benchmarks(samples, A, resids):
     A = np.array(A)
     resids = np.array(resids)
@@ -149,10 +167,10 @@ for idx, dist in enumerate(["normal"]):
         df = pd.DataFrame(output_dict).merge(weights_df, on=["name"], how="left")
 
         df1 = (
-            df.groupby(["alpha", "method"])["loss"]
+            df.groupby(["alpha", "method"])["spl"]
             .mean()
             .reset_index()
-            .pivot(index="method", columns="alpha", values="loss")
+            .pivot(index="method", columns="alpha", values="spl")
         )
         df2 = (
             df.groupby(["method", "level", "idx"])[["spl", "weights"]]
@@ -172,7 +190,7 @@ for idx, dist in enumerate(["normal"]):
         benchmark = pd.DataFrame(
             [
                 [
-                    "ARIMA - Benchmark",
+                    "ARIMA",
                     0.158,
                     0.148,
                     0.163,
@@ -188,12 +206,10 @@ for idx, dist in enumerate(["normal"]):
         )
         df2 = pd.concat([df2, benchmark], ignore_index=True)
         df2["Average"] = df2[[f"Level{level}" for level in range(1, 10)]].mean(axis=1)
-        output.write_text(
-            df1.to_latex(float_format="%.3f", label=" ", caption="M5 Pinball loss")
-        )
-        output_spl.write_text(
-            df2.to_latex(float_format="%.3f", label=" ", caption="M5 SPL")
-        )
+        df2.set_index("method", inplace=True)
+        methods = ["base", "QOpt", "ols", "wls", "shr", "sam"]
+        output.write_text(style(df1, methods))
+        output_spl.write_text(style(df2, methods))
 
 
 if __name__ == "__main__":

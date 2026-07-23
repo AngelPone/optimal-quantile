@@ -7,16 +7,50 @@ from typing import Annotated
 
 from M5_reduced.config import (
     ALPHAs,
-    data_catalog,
+    BETAs,
     OUTPUT_SAMPLE_SIZE,
     TABLES_PATH,
     DATA_OUTPUT_PATH,
     BETAs,
     LOGGING_PATH,
+    M5_PATH,
+    data_catalog,
 )
+from M5_reduced.data_prepare import add_derived_keys, LEVEL_SPECS, make_series_names
 from pytask import task, Product
 from pathlib import Path
 from opt_rec_quantile.loss import pinball_loss
+
+
+def style(df, methods):
+    def format_value(x):
+        if x == minimum:
+            return rf"\textbf{{{x:.3f}}}"
+        if second_minimum is not None and x == second_minimum:
+            return rf"\textcolor{{red}}{{{x:.3f}}}"
+        return f"{x:.3f}"
+
+    for col in df.columns:
+        unique_values = df[col].dropna().unique()
+        unique_values.sort()
+        minimum = unique_values[0]
+        second_minimum = unique_values[1] if len(unique_values) > 1 else None
+        df[col] = [format_value(value) for value in df[col]]
+
+    target_rows = ["base", "QOpt($\\beta=1000$)"]
+    latex = df.loc[methods].to_latex(escape=False)
+    lines = latex.splitlines()
+    new_lines = []
+
+    for line in lines:
+        new_lines.append(line)
+
+        for target_row in target_rows:
+            if line.strip().startswith(target_row):
+                new_lines.append(r"\midrule")
+
+    latex = "\n".join(new_lines)
+    return latex
 
 
 def benchmarks(samples, A, resids, alpha):
@@ -62,6 +96,7 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
         input_rf: Annotated[dict, rf],
         data_path: Path = DATA_OUTPUT_PATH,
         output: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}.tex",
+        output_spl: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_spl_{dist}.tex",
         output_df: Annotated[Path, Product] = LOGGING_PATH / f"M5_ets_{dist}.csv",
         dist: str = dist,
         seed: int = seed,
@@ -70,7 +105,9 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
         generator.manual_seed(seed)
 
         with open(data_path, "rb") as f:
-            S = torch.as_tensor(pkl.load(f)["S"], dtype=torch.float64)
+            data = pkl.load(f)
+            S = torch.as_tensor(data["S"], dtype=torch.float64)
+            names = data["names"]
         n, m = S.shape
 
         A = S[:-m, :]
@@ -121,6 +158,7 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
             "alpha": [],
             "h": [],
             "series_code": [],
+            "name": [],
         }
 
         hist = base[0]["hist"]
@@ -164,12 +202,85 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
                         output_dict["loss"].append(loss[i])
                         output_dict["h"].append(h)
                         output_dict["series_code"].append(i)
+                        output_dict["name"].append(names[i])
         df = pd.DataFrame(output_dict)
         df.to_csv(output_df)
-        df = df.groupby(["method", "alpha"]).mean()["loss"].reset_index()
-        df = df.pivot(index="method", columns="alpha", values="loss")
-        df.columns = [f"{i:.3f}" for i in df.columns]
-        output.write_text(df.to_latex(float_format="%.3f", label=" ", caption="M5"))
+        df1 = (
+            df.groupby(["method", "alpha"])
+            .mean(numeric_only=True)["loss"]
+            .reset_index()
+        )
+        methods = (
+            ["base"]
+            + [f"QOpt($\\beta={beta}$)" for beta in BETAs]
+            + ["ols", "wls", "shr", "sam"]
+        )
+        df1 = df1.pivot(index="method", columns="alpha", values="loss")
+        df1.columns = [f"{i:.3f}" for i in df1.columns]
+        df1 = style(df1, methods)
+        output.write_text(df1)
+
+        weights = pd.read_csv(M5_PATH / "weights_evaluation.csv").rename(
+            columns={"Agg_Level_1": "item_id", "Agg_Level_2": "store_id"}
+        )
+        weights = add_derived_keys(weights)
+        weights = weights[weights["Level_id"] == "Level12"]
+        weights_df = {"name": [], "weights": [], "level": []}
+        for level in LEVEL_SPECS:
+            if level.group_keys:
+                level_weights = (
+                    weights.groupby([i for i in level.group_keys])["weight"]
+                    .sum()
+                    .reset_index()
+                )
+                weights_df["name"].extend(
+                    make_series_names(level_weights, level.group_keys).tolist()
+                )
+                weights_df["level"].extend([level.key] * level_weights.shape[0])
+                weights_df["weights"].extend(level_weights["weight"].values.tolist())
+            else:
+                weights_df["name"].append("Total")
+                weights_df["weights"].append(1)
+                weights_df["level"].append("level1")
+
+        weights_df = pd.DataFrame(weights_df)
+        df = df.merge(weights_df, on="name", how="left")
+        df2 = (
+            df.groupby(["method", "level", "series_code"])[["loss", "weights"]]
+            .mean()
+            .reset_index()
+        )
+        df2["spl"] = df2["loss"] * df2["weights"]
+        df2 = (
+            df2.groupby(["method", "level"])[["spl"]]
+            .sum()
+            .reset_index()
+            .pivot(index="method", columns="level", values="spl")
+            .sort_index(axis=1)
+            .reset_index()
+        )
+        benchmark = pd.DataFrame(
+            [
+                [
+                    "ARIMA",
+                    0.158,
+                    0.148,
+                    0.163,
+                    0.147,
+                    0.167,
+                    0.170,
+                    0.202,
+                    0.178,
+                    0.201,
+                ]
+            ],
+            columns=["method"] + [f"level{i}" for i in range(1, 10)],
+        )
+        df2 = pd.concat([df2, benchmark], ignore_index=True)
+        df2["Average"] = df2[[f"level{level}" for level in range(1, 10)]].mean(axis=1)
+        df2.set_index("method", inplace=True)
+        df2 = style(df2, ["ARIMA"] + methods)
+        output_spl.write_text(df2)
 
 
 if __name__ == "__main__":
@@ -183,10 +294,4 @@ if __name__ == "__main__":
             for beta in BETAs
         ]
         base = data_catalog["base"].load()
-        task_collect(
-            base,
-            rf,
-            dist=dist,
-            seed=seed,
-            output=TABLES_PATH / f"M5_ets_{dist}.tex",
-        )
+        task_collect(base, rf, dist=dist, seed=seed)

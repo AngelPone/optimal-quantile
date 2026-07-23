@@ -1,17 +1,13 @@
-\begin{table}
-\caption{M5 SPL}
-\label{ }
-\begin{tabular}{llrrrrrrrrrr}
+\begin{tabular}{lllllllllll}
 \toprule
- & method & Level1 & Level2 & Level3 & Level4 & Level5 & Level6 & Level7 & Level8 & Level9 & Average \\
+ & Level1 & Level2 & Level3 & Level4 & Level5 & Level6 & Level7 & Level8 & Level9 & Average \\
+method &  &  &  &  &  &  &  &  &  &  \\
 \midrule
-0 & QOpt & 0.085 & 0.117 & 0.136 & 0.095 & 0.143 & 0.143 & 0.174 & 0.160 & 0.195 & 0.138 \\
-1 & base & 0.097 & 0.128 & 0.142 & 0.084 & 0.164 & 0.156 & 0.187 & 0.163 & 0.190 & 0.146 \\
-2 & ols & 0.075 & 0.112 & 0.137 & 0.091 & 0.142 & 0.145 & 0.179 & 0.165 & 0.200 & 0.138 \\
-3 & sam & 0.094 & 0.121 & 0.142 & 0.107 & 0.140 & 0.144 & 0.173 & 0.165 & 0.197 & 0.142 \\
-4 & shr & 0.101 & 0.119 & 0.139 & 0.107 & 0.132 & 0.140 & 0.164 & 0.159 & 0.185 & 0.138 \\
-5 & wls & 0.182 & 0.180 & 0.176 & 0.172 & 0.188 & 0.193 & 0.205 & 0.185 & 0.196 & 0.186 \\
-6 & ARIMA - Benchmark & 0.158 & 0.148 & 0.163 & 0.147 & 0.167 & 0.170 & 0.202 & 0.178 & 0.201 & 0.170 \\
+base & 0.097 & 0.128 & 0.142 & \textbf{0.084} & 0.164 & 0.156 & 0.187 & 0.163 & \textcolor{red}{0.190} & 0.146 \\
+QOpt & \textcolor{red}{0.085} & \textcolor{red}{0.117} & \textbf{0.136} & 0.095 & 0.143 & \textcolor{red}{0.143} & 0.174 & \textcolor{red}{0.160} & 0.195 & 0.138 \\
+ols & \textbf{0.075} & \textbf{0.112} & \textcolor{red}{0.137} & \textcolor{red}{0.091} & 0.142 & 0.145 & 0.179 & 0.165 & 0.200 & \textbf{0.138} \\
+wls & 0.182 & 0.180 & 0.176 & 0.172 & 0.188 & 0.193 & 0.205 & 0.185 & 0.196 & 0.186 \\
+shr & 0.101 & 0.119 & 0.139 & 0.107 & \textbf{0.132} & \textbf{0.140} & \textbf{0.164} & \textbf{0.159} & \textbf{0.185} & \textcolor{red}{0.138} \\
+sam & 0.094 & 0.121 & 0.142 & 0.107 & \textcolor{red}{0.140} & 0.144 & \textcolor{red}{0.173} & 0.165 & 0.197 & 0.142 \\
 \bottomrule
 \end{tabular}
-\end{table}

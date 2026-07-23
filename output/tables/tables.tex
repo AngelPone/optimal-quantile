@@ -1,0 +1,42 @@
+\documentclass{article}
+\usepackage{booktabs, graphicx, xcolor, amsmath}
+
+\begin{document}
+
+
+\begin{table}
+\caption{Scaled Pinball Loss by $\alpha$, Normal, ETS, $G_{\text{init}}=G_{\text{shr}}$ }
+\resizebox{\textwidth}{!}{
+\input{./M5_ets_normal.tex}}
+\end{table}
+\begin{table}
+\caption{Scaled Pinball Loss by $\alpha$, SkewNormal, ETS, $G_{\text{init}}= G_{\text{shr}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_ets_skewnormal.tex}}
+\end{table}
+
+
+\begin{table}
+\caption{Weighted Scaled Pinball Loss by level, Normal, ETS, $G_{\text{init}}= G_{\text{shr}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_ets_spl_normal.tex}}    
+\end{table}
+\begin{table}
+\caption{Weighted Scaled Pinball Loss by level, SkewNormal, ETS,$G_{\text{init}}= G_{\text{shr}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_ets_spl_normal.tex}}
+\end{table}
+
+\begin{table}
+\caption{Weighted Scaled Pinball Loss by level, Normal, LightGBM, $G_{\text{init}}= G_{\text{ols}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_spl_normal.tex}}
+\end{table}
+\begin{table}
+\caption{Scaled Pinball Loss by $\alpha$, Normal, LightGBM, $G_{\text{init}}= G_{\text{ols}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_acc_normal.tex}}    
+\end{table}
+
+
+\end{document}

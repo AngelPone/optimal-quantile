@@ -17,3 +17,6 @@ OUTPUT_SAMPLE_SIZE = 10000
 BETAs = [10, 20, 50, 100, 200, 500, 1000]
 data_catalog = DataCatalog(name="M5_reduced")
 FACTOR = 1e3
+M5_PATH = Path(
+    "/Users/bohan/Library/CloudStorage/Nextcloud-bohan@nc․bohan-zhang․com/Documents/datasets/m5-forecasting-accuracy",
+)
