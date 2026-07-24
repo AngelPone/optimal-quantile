@@ -1,9 +1,9 @@
 import torch
-from torch.utils.data import DataLoader, TensorDataset
-import logging
 from opt_rec_quantile.loss import ApproxPinballLoss, approx_pinball_loss, pinball_loss
 from typing import Callable
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.tensorboard import SummaryWriter
+from pathlib import Path
 
 
 class QOptRec:
@@ -45,7 +45,7 @@ class QOptRec:
         d: torch.Tensor,
         weights: torch.Tensor | None,
     ):
-        loss = torch.tensor(0.0)
+        loss = torch.tensor(0.0, device=G.device, dtype=G.dtype)
         S = self.S.to(dtype=G.dtype, device=G.device)
         bias = torch.einsum("mk,nm->nk", d, S)
         with torch.no_grad():
@@ -65,7 +65,7 @@ class QOptRec:
         d: torch.Tensor,
         weights: torch.Tensor | None = None,
     ):
-        loss = torch.tensor(0.0)
+        loss = torch.tensor(0.0, device=G.device, dtype=G.dtype)
         S = self.S.to(dtype=G.dtype, device=G.device)
         bias = torch.einsum("mk,nm->nk", d, S)
         rf = torch.einsum("tnj,kn->tkj", y_pred, self.S @ G)
@@ -94,10 +94,14 @@ class QOptRec:
         sampling_val: Callable[[], torch.Tensor] | None = None,
         y_val: torch.Tensor | None = None,
         batch_size: int | None = None,
+        log_dir: Path | None = None,
     ):
         assert y.shape[1] == self.n
         if not 0 < lr_decay <= 1:
             raise ValueError("lr_decay must be in (0, 1].")
+
+        writer = SummaryWriter(log_dir)
+
         if isinstance(G, str):
             if G == "ols":
                 G = torch.linalg.solve(self.S.T @ self.S, self.S.T)
@@ -129,7 +133,10 @@ class QOptRec:
         optimizer = self.optimizer_cls(params=[G, d], **optimizer_kwargs)
 
         best_pinball_loss = float("inf")
-        scheduler = ReduceLROnPlateau(optimizer, "min", factor=0.5)
+        scheduler = ReduceLROnPlateau(
+            optimizer, "min", factor=0.5, patience=20, cooldown=20
+        )
+
         best_G = G.detach().clone()
         best_d = d.detach().clone()
         self.smooth_loss_history_ = []
@@ -152,19 +159,26 @@ class QOptRec:
                 loss.backward()
                 optimizer.step()
                 loss_item = loss.detach().item()
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    (G, d),
+                    max_norm=float("inf"),
+                )
             else:
                 perm = torch.randperm(y.shape[0], generator=generator)
                 loss_item = 0.0
+                train_num_samples = 0
                 for start in range(0, y.shape[0], batch_size):
                     batch_indices = perm[start : start + batch_size]
                     batch_y = y[batch_indices]
                     batch_y_pred = sampling(batch_indices)
                     optimizer.zero_grad()
                     loss = self._loss(batch_y, batch_y_pred, G, d, weights)
-                    loss_item += loss.detach().item()
                     loss.backward()
                     optimizer.step()
-                loss_item = loss_item / len(range(0, y.shape[0], batch_size))
+                    bs = batch_y.shape[0]
+                    loss_item += loss.detach().item() * bs
+                    train_num_samples += bs
+                loss_item = loss_item / train_num_samples
             param_groups = getattr(optimizer, "param_groups", None)
             if param_groups is not None:
                 if lr_decay < 1:
@@ -172,23 +186,36 @@ class QOptRec:
                         param_group["lr"] *= lr_decay
 
             with torch.no_grad():
-                current_pinball_loss = self._pinball_loss(
-                    y_val, eval_y_pred, G, d, weights
-                ).item()
+                val_pl = self._pinball_loss(y_val, eval_y_pred, G, d, weights).item()
                 self.smooth_loss_history_.append(loss_item)
-                self.pinball_loss_history_.append(current_pinball_loss)
-                if current_pinball_loss < best_pinball_loss:
-                    best_pinball_loss = current_pinball_loss
+                self.pinball_loss_history_.append(val_pl)
+                if val_pl < best_pinball_loss:
+                    best_pinball_loss = val_pl
                     best_G = G.detach().clone()
                     best_d = d.detach().clone()
-            scheduler.step(current_pinball_loss)
+            scheduler.step(val_pl)
 
-            logging.info(
-                f"Step {step}: loss: {loss.detach():.4f}, "
-                f"pinball_loss: {current_pinball_loss:.4f}"
-            )
+            writer.add_scalar("Loss/train", loss_item, step)
+            writer.add_scalar("Loss/Validation", val_pl, step)
+            writer.add_scalar("Debug/grad_norm", grad_norm.item(), step)
+            writer.add_scalar("Learning_rate", scheduler.get_last_lr()[0], step)
 
         self.best_pinball_loss_ = best_pinball_loss
         self.final_G_ = G.detach().clone()
         self.final_d_ = d.detach().clone()
+
+        writer.add_hparams(
+            {
+                "batch_size": y.shape[0] if batch_size is None else batch_size,
+                "beta": self.beta,
+                "alpha": self.alpha[0],
+                "sample_size": sampling().shape[2],
+            },
+            {
+                "final_aprox_loss": loss_item,
+                "final_pinball_loss": val_pl,
+                "best_pinball_loss": best_pinball_loss,
+            },
+        )
+        writer.close()
         return best_G, best_d

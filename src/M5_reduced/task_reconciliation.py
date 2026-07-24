@@ -3,34 +3,29 @@ from typing import Annotated
 from M5_reduced.config import (
     data_catalog,
     ALPHAs,
-    DATA_OUTPUT_PATH,
     BETAs,
     LOGGING_PATH,
 )
-import logging
-from forecopy import cscov, cstools
 from opt_rec_quantile.model import QOptRec
+from utils import SkewNormal
 
 import torch
-import numpy as np
-import pickle as pkl
-from pathlib import Path
+from torch.distributions import Normal
 
-LR = 0.0005
-SAMPLE_SIZE = 100
-VAL_SAMPLE_SIZE = 1000
-MAX_ITER = 100
-VERSION = 20260723
+LR = 0.0001
+SAMPLE_SIZE = 300
+VAL_SAMPLE_SIZE = 3000
+MAX_ITER = 300
+VERSION = 20260727
 
 for alpha in ALPHAs:
-    for idx, dist in enumerate(["skewnormal", "normal"]):
+    for idx, dist in enumerate(["normal"]):
         for beta in BETAs:
-            seed = 20260706 + int(alpha * 1000) + beta * 10000 + idx
+            seed = VERSION + int(alpha * 1000) + beta * 10000 + idx
 
             @task
             def task_perform_reconciliation(
-                base: Annotated[dict, data_catalog["base"]],
-                data_path: Path = DATA_OUTPUT_PATH,
+                train_data: Annotated[dict, data_catalog["train_data"]],
                 output: Annotated[dict, Product] = data_catalog[
                     f"rf_{alpha}_{beta}_{dist}"
                 ],
@@ -40,102 +35,34 @@ for alpha in ALPHAs:
                 seed: int = seed,
             ) -> None:
 
-                logging.basicConfig(
-                    level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s",
-                    handlers=[
-                        logging.FileHandler(
-                            LOGGING_PATH
-                            / f"M5_ets_LR{int(LR*10000)}_SMP{SAMPLE_SIZE}_{VERSION}.log"
-                        )
-                    ],
-                    force=True,
-                )
+                torch.manual_seed(seed)
 
-                logging.info(
-                    "============================================================================"
-                )
-                logging.info(
-                    f"alpha={alpha} dist={dist} beta={beta} SMP={SAMPLE_SIZE} VAL_SMP={VAL_SAMPLE_SIZE} LR={LR} OPTIM=Adam"
-                )
-                logging.info(
-                    "==========================================================================="
-                )
-                with open(data_path, "rb") as f:
-                    data = pkl.load(f)
-
-                generator = torch.Generator()
-                generator.manual_seed(seed)
-
-                S = data["S"]
-                m = S.shape[1]
-                A = torch.as_tensor(S[:-m, :], dtype=torch.float64)
-
-                h = 1
-                # for h in range(1, FORECAST_HORIZON + 1):
-                all_slice = range(len(base) - h - 56 * 7, len(base) - h)
-                mean = torch.stack([i["mean"][:, h - 1] for i in base])
-                true_y = torch.as_tensor(
-                    np.stack([i["future"][h - 1, :] for i in base]),
-                    dtype=mean.dtype,
-                    device=mean.device,
-                )
-                n = mean.shape[1]
+                all_slice = range(train_data["mean"].shape[0])
+                normal_loc, normal_scale = train_data["normal"]
+                sn_xi, sn_loc, sn_scale = train_data["skewnormal"]
 
                 def sampling(dist: str, smp_slice, size: int = SAMPLE_SIZE):
 
                     if dist == "normal":
-                        smp_loc = (
-                            torch.stack(
-                                [
-                                    torch.stack(
-                                        [base[i]["normal"][j].loc for j in range(n)]
-                                    )
-                                    for i in smp_slice
-                                ]
-                            )
-                            .unsqueeze(-1)
-                            .expand(len(smp_slice), n, size)
+                        smps = (
+                            Normal(normal_loc[smp_slice], normal_scale[smp_slice])
+                            .sample((size,))
+                            .permute((1, 2, 0))
                         )
-                        smp_scale = (
-                            torch.stack(
-                                [
-                                    torch.stack(
-                                        [base[i]["normal"][j].scale for j in range(n)]
-                                    )
-                                    for i in smp_slice
-                                ]
-                            )
-                            .unsqueeze(-1)
-                            .expand(len(smp_slice), n, size)
-                        )
-                        smps = torch.normal(smp_loc, smp_scale, generator=generator)
                     elif dist == "skewnormal":
-                        smps = torch.stack(
-                            [
-                                torch.stack(
-                                    [
-                                        base[i][dist][j].sample(
-                                            size, generator=generator
-                                        )
-                                        for j in range(n)
-                                    ]
-                                )
-                                for i in smp_slice
-                            ]
+                        smps = (
+                            SkewNormal(
+                                sn_xi[smp_slice], sn_loc[smp_slice], sn_scale[smp_slice]
+                            )
+                            .sample((size,))
+                            .permute((1, 2, 0))
                         )
-                    return mean[smp_slice, :, None] + smps
+                    return train_data["mean"][smp_slice, :, None] + smps
 
-                hist = base[0]["hist"]
-                hist = np.concat([hist, np.stack([i["future"][0,] for i in base[:-1]])])
-                weights = np.array(
-                    [np.abs(np.diff(hist[:, i])).mean() for i in range(hist.shape[1])]
-                )
-                weights = torch.as_tensor(weights, dtype=true_y.dtype)
                 train_slice = all_slice[:-28]
-                val_slice = all_slice[-28:]
+                val_slice = all_slice[-28 * 3 :]
                 model_normal = QOptRec(
-                    A,
+                    train_data["A"],
                     alpha=alpha,
                     beta=beta,
                     optimizer_kwargs={"lr": LR},
@@ -155,33 +82,27 @@ for alpha in ALPHAs:
                     source_indices = select_source(val_slice, local_indices)
                     return sampling(dist, source_indices, VAL_SAMPLE_SIZE)
 
-                resids = base[-1]["resid"]
-                resids = resids - resids.mean(axis=0)
-                with open(data_path, "rb") as f:
-                    S = torch.as_tensor(pkl.load(f)["S"], dtype=torch.float64)
-                n, m = S.shape
-                A = S[:-m, :]
-                params = cstools(agg_mat=A)
-                W = cscov(params, res=resids).fit(comb="shr")
-                W = torch.as_tensor(np.linalg.inv(W), dtype=torch.float64)
-                shr_mat = torch.linalg.solve(S.T @ W @ S, S.T @ W)
-
                 G, d = model_normal.train(
-                    true_y[train_slice],
+                    train_data["y"][train_slice],
                     train_sampling,
-                    G=shr_mat,
-                    weights=weights,
-                    generator=generator,
+                    G=train_data["G_shr"],
+                    weights=train_data["weights"],
                     sampling_val=val_sampling,
-                    y_val=true_y[val_slice],
+                    y_val=train_data["y"][val_slice],
                     max_iter=MAX_ITER,
+                    log_dir=LOGGING_PATH
+                    / f"alpha{int(alpha[0]*1000)}"
+                    / f"beta{beta}"
+                    / f"lr{int(LR*10000)}_{VERSION}",
                 )
                 output.save({"mdl": model_normal, "result": (G, d)})
-
-                return
 
 
 if __name__ == "__main__":
     task_perform_reconciliation(
-        base=data_catalog["base"].load(), seed=3, dist="normal", alpha=[0.005], beta=100
+        data_catalog["train_data"].load(),
+        alpha=[0.005],
+        beta=100,
+        seed=42,
+        dist="normal",
     )

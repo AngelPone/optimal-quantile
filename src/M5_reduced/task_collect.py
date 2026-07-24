@@ -1,25 +1,20 @@
-import numpy as np
-import pickle as pkl
-import pandas as pd
-from forecopy import cstools, csrec
-import torch
+from pathlib import Path
 from typing import Annotated
 
+import pandas as pd
+import torch
+from pytask import Product, task
+
 from M5_reduced.config import (
-    ALPHAs,
-    BETAs,
+    DEVICE,
+    DTYPE,
+    LOGGING_PATH,
     OUTPUT_SAMPLE_SIZE,
     TABLES_PATH,
-    DATA_OUTPUT_PATH,
+    ALPHAs,
     BETAs,
-    LOGGING_PATH,
-    M5_PATH,
     data_catalog,
 )
-from M5_reduced.data_prepare import add_derived_keys, LEVEL_SPECS, make_series_names
-from pytask import task, Product
-from pathlib import Path
-from opt_rec_quantile.loss import pinball_loss
 
 
 def style(df, methods):
@@ -53,157 +48,78 @@ def style(df, methods):
     return latex
 
 
-def benchmarks(samples, A, resids, alpha):
-    A = A.numpy()
-    params = cstools(agg_mat=A)
-    olss = []
-    wlss = []
-    shrs = []
-    sams = []
-    resids[np.abs(resids) > 10000] = resids.mean()
-    resids_demean = resids - resids.mean(axis=0)[None, :]
-    for i in range(samples.shape[0]):
-        smps = samples[i, :, :].T.numpy()
-        ols = csrec(smps, params=params, res=resids_demean, comb="ols")
-        olss.append(ols.T)
-        wls = csrec(smps, params=params, res=resids_demean, comb="wls")
-        wlss.append(wls.T)
-        shr = csrec(smps, params=params, res=resids_demean, comb="shr")
-        shrs.append(shr.T)
-        sam = csrec(smps, params=params, res=resids_demean, comb="sam")
-        sams.append(sam.T)
-    return [
-        {
-            "ols": torch.as_tensor(np.quantile(np.stack(olss), q=alpha, axis=2)),
-            "wls": torch.as_tensor(np.quantile(np.stack(wlss), q=alpha, axis=2)),
-            "shr": torch.as_tensor(np.quantile(np.stack(shrs), q=alpha, axis=2)),
-            "sam": torch.as_tensor(np.quantile(np.stack(sams), q=alpha, axis=2)),
-        }
-        for alpha in alpha
-    ]
-
-
-for idx, dist in enumerate(["normal", "skewnormal"]):
+for idx, dist in enumerate(["normal"]):
     seed = 20260720 + idx
-    rf = [
-        {alpha: data_catalog[f"rf_{alpha}_{beta}_{dist}"] for alpha in ALPHAs}
-        for beta in BETAs
-    ]
+    rf = {
+        alpha: {beta: data_catalog[f"rf_{alpha}_{beta}_{dist}"] for beta in BETAs}
+        for alpha in ALPHAs
+    }
 
     @task
     def task_collect(
-        base: Annotated[dict, data_catalog["base"]],
         input_rf: Annotated[dict, rf],
-        data_path: Path = DATA_OUTPUT_PATH,
+        input_data: Annotated[dict, data_catalog["test_data"]],
         output: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}.tex",
         output_spl: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_spl_{dist}.tex",
         output_df: Annotated[Path, Product] = LOGGING_PATH / f"M5_ets_{dist}.csv",
         dist: str = dist,
         seed: int = seed,
     ):
-        generator = torch.Generator()
-        generator.manual_seed(seed)
+        torch.manual_seed(seed)
 
-        with open(data_path, "rb") as f:
-            data = pkl.load(f)
-            S = torch.as_tensor(data["S"], dtype=torch.float64)
-            names = data["names"]
-        n, m = S.shape
-
-        A = S[:-m, :]
-
-        def sampling(dist: str, smp_slice, size: int = OUTPUT_SAMPLE_SIZE):
-
+        def sampling(dist: str, size: int = OUTPUT_SAMPLE_SIZE):
             if dist == "normal":
-                smp_loc = (
-                    torch.stack(
-                        [
-                            torch.stack([base[i]["normal"][j].loc for j in range(n)])
-                            for i in smp_slice
-                        ]
-                    )
-                    .unsqueeze(-1)
-                    .expand(len(smp_slice), n, size)
-                )
-                smp_scale = (
-                    torch.stack(
-                        [
-                            torch.stack([base[i]["normal"][j].scale for j in range(n)])
-                            for i in smp_slice
-                        ]
-                    )
-                    .unsqueeze(-1)
-                    .expand(len(smp_slice), n, size)
-                )
-                smps = torch.normal(smp_loc, smp_scale, generator=generator)
+                smps = input_data["normal"].sample((size,)).permute((1, 0))
             elif dist == "skewnormal":
-                smps = torch.stack(
-                    [
-                        torch.stack(
-                            [
-                                base[i][dist][j].sample(size, generator=generator)
-                                for j in range(n)
-                            ]
-                        )
-                        for i in smp_slice
-                    ]
+                smps = input_data["skewnormal"].sample((size,)).permute((1, 0))
+            smps = smps.to(dtype=DTYPE, device=DEVICE)
+            return input_data["mean"][:, :, None] + smps
+
+        smps = sampling(dist)
+        A = input_data["A"]
+        S = torch.concat([A, torch.eye(A.shape[1], dtype=A.dtype, device=A.device)])
+
+        qf = {}
+        for alpha in ALPHAs:
+            qf[alpha] = {"base": torch.quantile(smps, alpha, dim=2)}
+        for m, g in input_data["G"].items():
+            rf_smps = torch.einsum("kn,TnJ->TkJ", S @ g, smps)
+            for alpha in ALPHAs:
+                qf[alpha][m] = torch.quantile(rf_smps, alpha, dim=2)
+        for beta in BETAs:
+            for alpha in ALPHAs:
+                g, d = input_rf[alpha][beta]["result"]
+                rf_smps = (
+                    torch.einsum("kn,TnJ->TkJ", S @ g, smps)
+                    + (S @ d[:, 0])[None, :, None]
                 )
-            return mean[smp_slice, :, None] + smps
+                m = f"QOpt($\\beta={beta}$)"
+                qf[alpha][m] = torch.quantile(rf_smps, alpha, dim=2)
 
-        test_slice = range(len(base) - 1, len(base))
-        resids = base[-1]["resid"]
-        output_dict = {
-            "method": [],
-            "loss": [],
-            "alpha": [],
-            "h": [],
-            "series_code": [],
-            "name": [],
-        }
+        def spl(x, alpha, weights):
+            loss = torch.where(x < 0, -(1 - alpha) * x, alpha * x)
+            return loss / weights
 
-        hist = base[0]["hist"]
-        hist = np.concat([hist, np.stack([i["future"][0,] for i in base[:-1]])])
-        mod = [np.abs(np.diff(hist[:, i])).mean() for i in range(hist.shape[1])]
+        true_y = input_data["y"]
+        dfs = []
+        for alpha in ALPHAs:
+            for method, q in qf[alpha].items():
+                loss = spl(true_y - q, alpha, input_data["weights"]).cpu().numpy()
+                df = pd.DataFrame(loss.T)
+                df.columns = [i for i in range(1, 29)]
+                df["method"] = method
+                df["alpha"] = alpha
+                df["idx"] = range(S.shape[0])
+                dfs.append(df)
+        dfs = pd.concat(dfs)
+        df = pd.melt(
+            dfs,
+            id_vars=["method", "alpha", "idx"],
+            value_vars=range(1, 29),
+            value_name="loss",
+            var_name="h",
+        )
 
-        for h in range(1, 29):
-            mean = torch.stack([i["mean"][:, h - 1] for i in base])
-            true_y = torch.as_tensor(
-                np.stack([i["future"][h - 1, :] for i in base]),
-                dtype=mean.dtype,
-                device=mean.device,
-            )
-            smps = sampling(dist, test_slice)
-            res = benchmarks(smps, A, resids, ALPHAs)
-
-            for alpha_idx, alpha in enumerate(ALPHAs):
-                res[alpha_idx]["base"] = torch.quantile(smps, q=alpha, dim=2)
-                for idx, beta in enumerate(BETAs):
-                    G, d = input_rf[idx][alpha]["result"]
-                    d = d[:, 0]
-                    rf_samples = (
-                        torch.einsum("tnj,kn->tkj", smps, S @ G)
-                        + (S @ d)[None, :, None]
-                    )
-                    q = torch.quantile(rf_samples, alpha, dim=2)
-                    res[alpha_idx][f"QOpt($\\beta={beta}$)"] = q
-                for method, q in res[alpha_idx].items():
-                    loss = [
-                        (
-                            pinball_loss(true_y[test_slice, i] - q[0, i], alpha=alpha)
-                            .detach()
-                            .item()
-                            / mod[i]
-                        )
-                        for i in range(q.numel())
-                    ]
-                    for i in range(len(loss)):
-                        output_dict["method"].append(method)
-                        output_dict["alpha"].append(alpha)
-                        output_dict["loss"].append(loss[i])
-                        output_dict["h"].append(h)
-                        output_dict["series_code"].append(i)
-                        output_dict["name"].append(names[i])
-        df = pd.DataFrame(output_dict)
         df.to_csv(output_df)
         df1 = (
             df.groupby(["method", "alpha"])
@@ -220,33 +136,9 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
         df1 = style(df1, methods)
         output.write_text(df1)
 
-        weights = pd.read_csv(M5_PATH / "weights_evaluation.csv").rename(
-            columns={"Agg_Level_1": "item_id", "Agg_Level_2": "store_id"}
-        )
-        weights = add_derived_keys(weights)
-        weights = weights[weights["Level_id"] == "Level12"]
-        weights_df = {"name": [], "weights": [], "level": []}
-        for level in LEVEL_SPECS:
-            if level.group_keys:
-                level_weights = (
-                    weights.groupby([i for i in level.group_keys])["weight"]
-                    .sum()
-                    .reset_index()
-                )
-                weights_df["name"].extend(
-                    make_series_names(level_weights, level.group_keys).tolist()
-                )
-                weights_df["level"].extend([level.key] * level_weights.shape[0])
-                weights_df["weights"].extend(level_weights["weight"].values.tolist())
-            else:
-                weights_df["name"].append("Total")
-                weights_df["weights"].append(1)
-                weights_df["level"].append("level1")
-
-        weights_df = pd.DataFrame(weights_df)
-        df = df.merge(weights_df, on="name", how="left")
         df2 = (
-            df.groupby(["method", "level", "series_code"])[["loss", "weights"]]
+            df.merge(input_data["m5_weights"], on="idx", how="left")
+            .groupby(["method", "level", "idx"])[["loss", "weights"]]
             .mean()
             .reset_index()
         )
@@ -284,14 +176,13 @@ for idx, dist in enumerate(["normal", "skewnormal"]):
 
 
 if __name__ == "__main__":
-    for idx, dist in enumerate(["normal", "skewnormal"]):
+    for idx, dist in enumerate(["normal"]):
         seed = 20260720 + idx
-        rf = [
-            {
-                alpha: data_catalog[f"rf_{alpha}_{beta}_{dist}"].load()
-                for alpha in ALPHAs
+        rf = {
+            alpha: {
+                beta: data_catalog[f"rf_{alpha}_{beta}_{dist}"].load() for beta in BETAs
             }
-            for beta in BETAs
-        ]
-        base = data_catalog["base"].load()
-        task_collect(base, rf, dist=dist, seed=seed)
+            for alpha in ALPHAs
+        }
+        input_data = data_catalog["test_data"].load()
+        task_collect(rf, input_data, dist=dist, seed=seed)
