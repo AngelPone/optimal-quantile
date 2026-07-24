@@ -13,10 +13,12 @@ import torch
 from torch.distributions import Normal
 
 LR = 0.0001
-SAMPLE_SIZE = 300
-VAL_SAMPLE_SIZE = 3000
+SAMPLE_SIZE = {
+    alpha: (3000 if alpha in [0.005, 0.025, 0.975, 0.995] else 500) for alpha in ALPHAs
+}
+VAL_SAMPLE_SIZE = 5000
 MAX_ITER = 300
-VERSION = 20260727
+VERSION = 20260729
 
 for alpha in ALPHAs:
     for idx, dist in enumerate(["normal"]):
@@ -41,7 +43,7 @@ for alpha in ALPHAs:
                 normal_loc, normal_scale = train_data["normal"]
                 sn_xi, sn_loc, sn_scale = train_data["skewnormal"]
 
-                def sampling(dist: str, smp_slice, size: int = SAMPLE_SIZE):
+                def sampling(dist: str, smp_slice, size: int = SAMPLE_SIZE[alpha[0]]):
 
                     if dist == "normal":
                         smps = (
