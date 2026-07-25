@@ -12,13 +12,13 @@ from utils import SkewNormal
 import torch
 from torch.distributions import Normal
 
-LR = 0.0001
+LR = 1e-5
 SAMPLE_SIZE = {
     alpha: (3000 if alpha in [0.005, 0.025, 0.975, 0.995] else 500) for alpha in ALPHAs
 }
 VAL_SAMPLE_SIZE = 5000
-MAX_ITER = 300
-VERSION = 20260729
+MAX_ITER = 500
+VERSION = 20260734
 
 for alpha in ALPHAs:
     for idx, dist in enumerate(["normal"]):

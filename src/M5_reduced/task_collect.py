@@ -4,6 +4,7 @@ from typing import Annotated
 import pandas as pd
 import torch
 from pytask import Product, task
+from torch.utils.tensorboard import SummaryWriter
 
 from M5_reduced.config import (
     DEVICE,
@@ -15,6 +16,7 @@ from M5_reduced.config import (
     BETAs,
     data_catalog,
 )
+from M5_reduced.task_reconciliation import VERSION
 
 
 def style(df, methods):
@@ -173,6 +175,20 @@ for idx, dist in enumerate(["normal"]):
         df2.set_index("method", inplace=True)
         df2 = style(df2, ["ARIMA"] + methods)
         output_spl.write_text(df2)
+
+        methods_n = (
+            ["base"] + [f"QOpt_{beta}" for beta in BETAs] + ["ols", "wls", "shr", "sam"]
+        )
+
+        df_alpha = df.groupby(["h", "method", "alpha"]).mean(numeric_only=True)["loss"]
+        for idx, m in enumerate(methods):
+            writer = SummaryWriter(LOGGING_PATH / methods_n[idx] / str(VERSION))
+            for alpha in ALPHAs:
+                for h in range(1, 29):
+                    writer.add_scalar(
+                        f"Loss/alpha{int(alpha*1000)}", df_alpha[(h, m, alpha)], h - 1
+                    )
+            writer.close()
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import torch
 from opt_rec_quantile.loss import ApproxPinballLoss, approx_pinball_loss, pinball_loss
 from typing import Callable
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ExponentialLR, ConstantLR, SequentialLR, OneCycleLR
 from torch.utils.tensorboard import SummaryWriter
 from pathlib import Path
 
@@ -133,8 +133,13 @@ class QOptRec:
         optimizer = self.optimizer_cls(params=[G, d], **optimizer_kwargs)
 
         best_pinball_loss = float("inf")
-        scheduler = ReduceLROnPlateau(
-            optimizer, "min", factor=0.5, patience=20, cooldown=20
+        scheduler = OneCycleLR(
+            optimizer,
+            max_lr=optimizer_kwargs["lr"] * 10,
+            steps_per_epoch=1,
+            epochs=max_iter - 20,
+            div_factor=10,
+            final_div_factor=1e2,
         )
 
         best_G = G.detach().clone()
@@ -193,12 +198,15 @@ class QOptRec:
                     best_pinball_loss = val_pl
                     best_G = G.detach().clone()
                     best_d = d.detach().clone()
-            scheduler.step(val_pl)
+            if step > 19:
+                scheduler.step()
+                writer.add_scalar("Learning_rate", scheduler.get_last_lr()[0], step)
+            else:
+                writer.add_scalar("Learning_rate", optimizer_kwargs["lr"], step)
 
             writer.add_scalar("Loss/train", loss_item, step)
             writer.add_scalar("Loss/Validation", val_pl, step)
             writer.add_scalar("Debug/grad_norm", grad_norm.item(), step)
-            writer.add_scalar("Learning_rate", scheduler.get_last_lr()[0], step)
 
         self.best_pinball_loss_ = best_pinball_loss
         self.final_G_ = G.detach().clone()
