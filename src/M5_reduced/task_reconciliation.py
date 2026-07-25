@@ -18,7 +18,7 @@ SAMPLE_SIZE = {
 }
 VAL_SAMPLE_SIZE = 5000
 MAX_ITER = 500
-VERSION = 20260734
+VERSION = 20260735
 
 for alpha in ALPHAs:
     for idx, dist in enumerate(["normal"]):
@@ -87,7 +87,7 @@ for alpha in ALPHAs:
                 G, d = model_normal.train(
                     train_data["y"][train_slice],
                     train_sampling,
-                    G=train_data["G_shr"],
+                    G=train_data["G_wls"],
                     weights=train_data["weights"],
                     sampling_val=val_sampling,
                     y_val=train_data["y"][val_slice],

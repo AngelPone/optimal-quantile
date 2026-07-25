@@ -78,8 +78,14 @@ def task_collect_train(
         dtype=DTYPE,
         device=DEVICE,
     )
+    W_wls = torch.as_tensor(
+        np.linalg.inv(cscov(params, res=resids).fit(comb="wls")),
+        dtype=DTYPE,
+        device=DEVICE,
+    )
     W = torch.as_tensor(np.linalg.inv(W), dtype=DTYPE, device=DEVICE)
     shr_mat = torch.linalg.solve(S.T @ W @ S, S.T @ W)
+    wls_mat = torch.linalg.solve(S.T @ W_wls @ S, S.T @ W_wls)
     normal_loc = torch.tensor(
         [[i["normal"][j].loc for j in range(n)] for i in base[:-1]]
     ).to(device=DEVICE, dtype=DTYPE)
@@ -98,6 +104,7 @@ def task_collect_train(
             "y": true_y,
             "mean": mean,
             "G_shr": shr_mat,
+            "G_wls": wls_mat,
             "normal": (normal_loc, normal_scale),
             "skewnormal": (sn_xi, normal_loc, normal_scale),
         }
