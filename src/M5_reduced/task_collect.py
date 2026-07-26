@@ -181,6 +181,7 @@ for idx, dist in enumerate(["normal"]):
         )
 
         df_alpha = df.groupby(["h", "method", "alpha"]).mean(numeric_only=True)["loss"]
+        df_m = df.groupby(["method", "alpha"]).mean(numeric_only=True)["loss"]
         for idx, m in enumerate(methods):
             writer = SummaryWriter(LOGGING_PATH / methods_n[idx] / str(VERSION))
             for alpha in ALPHAs:
@@ -188,6 +189,9 @@ for idx, dist in enumerate(["normal"]):
                     writer.add_scalar(
                         f"Loss/alpha{int(alpha*1000)}", df_alpha[(h, m, alpha)], h - 1
                     )
+            if m.startswith("QOpt"):
+                for idx, alpha in enumerate(ALPHAs):
+                    writer.add_scalar("test/by-alpha", float(df_m[(m, alpha)]), idx)
             writer.close()
 
 

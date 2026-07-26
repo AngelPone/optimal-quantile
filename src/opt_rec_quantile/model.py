@@ -130,12 +130,17 @@ class QOptRec:
             device=y.device,
         )
         optimizer_kwargs = self.optimizer_kwargs or {}
-        optimizer = self.optimizer_cls(params=[G, d], **optimizer_kwargs)
+        optimizer = self.optimizer_cls(
+            [
+                {"params": (G,), "lr": optimizer_kwargs["lr"]},
+                {"params": (d,), "lr": optimizer_kwargs["lr"] * 1e4},
+            ]
+        )
 
         best_pinball_loss = float("inf")
         scheduler = OneCycleLR(
             optimizer,
-            max_lr=optimizer_kwargs["lr"] * 10,
+            max_lr=[optimizer_kwargs["lr"] * 10, optimizer_kwargs["lr"] * 1e5],
             steps_per_epoch=1,
             epochs=max_iter - 20,
             div_factor=10,
@@ -164,8 +169,12 @@ class QOptRec:
                 loss.backward()
                 optimizer.step()
                 loss_item = loss.detach().item()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    (G, d),
+                grad_norm_G = torch.nn.utils.clip_grad_norm_(
+                    G,
+                    max_norm=float("inf"),
+                )
+                grad_norm_d = torch.nn.utils.clip_grad_norm_(
+                    d,
                     max_norm=float("inf"),
                 )
             else:
@@ -184,11 +193,6 @@ class QOptRec:
                     loss_item += loss.detach().item() * bs
                     train_num_samples += bs
                 loss_item = loss_item / train_num_samples
-            param_groups = getattr(optimizer, "param_groups", None)
-            if param_groups is not None:
-                if lr_decay < 1:
-                    for param_group in param_groups:
-                        param_group["lr"] *= lr_decay
 
             with torch.no_grad():
                 val_pl = self._pinball_loss(y_val, eval_y_pred, G, d, weights).item()
@@ -200,30 +204,26 @@ class QOptRec:
                     best_d = d.detach().clone()
             if step > 19:
                 scheduler.step()
-                writer.add_scalar("Learning_rate", scheduler.get_last_lr()[0], step)
+                writer.add_scalar(
+                    "Debug/Learning_rate_G", scheduler.get_last_lr()[0], step
+                )
+                writer.add_scalar(
+                    "Debug/Learning_rate_d", scheduler.get_last_lr()[1], step
+                )
             else:
-                writer.add_scalar("Learning_rate", optimizer_kwargs["lr"], step)
+                writer.add_scalar("Debug/Learning_rate_G", optimizer_kwargs["lr"], step)
+                writer.add_scalar(
+                    "Debug/Learning_rate_d", optimizer_kwargs["lr"] * 1e4, step
+                )
 
             writer.add_scalar("Loss/train", loss_item, step)
             writer.add_scalar("Loss/Validation", val_pl, step)
-            writer.add_scalar("Debug/grad_norm", grad_norm.item(), step)
+            writer.add_scalar("Debug/grad_norm_G", grad_norm_G.item(), step)
+            writer.add_scalar("Debug/grad_norm_d", grad_norm_d.item(), step)
 
         self.best_pinball_loss_ = best_pinball_loss
         self.final_G_ = G.detach().clone()
         self.final_d_ = d.detach().clone()
 
-        writer.add_hparams(
-            {
-                "batch_size": y.shape[0] if batch_size is None else batch_size,
-                "beta": self.beta,
-                "alpha": self.alpha[0],
-                "sample_size": sampling().shape[2],
-            },
-            {
-                "final_aprox_loss": loss_item,
-                "final_pinball_loss": val_pl,
-                "best_pinball_loss": best_pinball_loss,
-            },
-        )
         writer.close()
         return best_G, best_d

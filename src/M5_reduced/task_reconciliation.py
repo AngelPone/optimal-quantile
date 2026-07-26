@@ -18,7 +18,7 @@ SAMPLE_SIZE = {
 }
 VAL_SAMPLE_SIZE = 5000
 MAX_ITER = 500
-VERSION = 20260735
+VERSION = 20260736
 
 for alpha in ALPHAs:
     for idx, dist in enumerate(["normal"]):
