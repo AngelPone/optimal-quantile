@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 import numpy as np
 import torch
+import math
 from torch.distributions import StudentT, Normal
 from torch.optim import LBFGS
 from scipy.special import stdtrit
@@ -249,7 +250,15 @@ class SkewStudentT:
         xi = self.xi
         df = self.df
         half = torch.as_tensor(0.5, dtype=xi.dtype, device=xi.device)
-        M1 = 2 * torch.sqrt(df) / ((df - 1) * torch_beta(half, df / 2))
+        log_m1 = (
+            math.log(2.0)
+            + 0.5 * torch.log(df)
+            - torch.log(df - 1)
+            - torch.lgamma(half)
+            - torch.lgamma(df / 2)
+            + torch.lgamma((df + 1) / 2)
+        )
+        M1 = torch.exp(log_m1)
         M2 = df / (df - 2)
         mu_xi = M1 * (xi - 1 / xi)
         var_xi = (M2 - M1**2) * (xi**2 + xi ** (-2)) + 2 * M1**2 - M2
@@ -301,17 +310,7 @@ class SkewStudentT:
         return self.loc + self.scale * (arg - mu_xi) / sigma_xi
 
 
-def torch_beta(x, y):
-    """
-    Computes the Beta function element-wise: B(x, y) = Gamma(x)*Gamma(y) / Gamma(x+y)
-    Supports autograd backpropagation out of the box.
-    """
-    # Compute in log-space to ensure numerical stability
-    log_beta = torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
-    return torch.exp(log_beta)
-
-
-def mle_estimation_skewed_dist(samples: np.ndarray, max_iter: int = 10):
+def mle_estimation_skewed_dist(samples: np.ndarray, max_iter: int = 20):
     dtype = torch.float64
 
     x = torch.as_tensor(samples, dtype=dtype)
@@ -320,19 +319,23 @@ def mle_estimation_skewed_dist(samples: np.ndarray, max_iter: int = 10):
     x_mean = x.mean()
     x_sd = x.std(correction=0)
     z = (x - x_mean) / x_sd
-    eta = torch.tensor(0.0, dtype=dtype, requires_grad=True)
-    log_df = torch.tensor(0.0, dtype=dtype, requires_grad=True)
+    raw_xi = torch.tensor(0.0, dtype=dtype, requires_grad=True)
+    raw_df = torch.tensor(0.0, dtype=dtype, requires_grad=True)
 
     optimizer = LBFGS(
-        params=[eta, log_df],
+        params=[raw_xi, raw_df],
         lr=0.5,
-        max_iter=100,
         line_search_fn="strong_wolfe",
     )
 
+    DF_MIN = torch.tensor(2.05, dtype=dtype, device=x.device)
+    DF_MAX = torch.tensor(200.0, dtype=dtype, device=x.device)
+    XI_MAX = torch.tensor(10.0, dtype=dtype, device=x.device)
+
     def nll():
-        xi = torch.exp(eta)
-        dist = SkewStudentT(xi, torch.exp(log_df) + 2.0)
+        xi = torch.exp(torch.log(XI_MAX) * torch.tanh(raw_xi))
+        df = DF_MIN + (DF_MAX - DF_MIN) * torch.sigmoid(raw_df)
+        dist = SkewStudentT(xi, df)
         return dist.log_prob(z).negative().sum()
 
     def closure():
@@ -343,11 +346,10 @@ def mle_estimation_skewed_dist(samples: np.ndarray, max_iter: int = 10):
 
     for _ in range(max_iter):
         optimizer.step(closure)
+    xi = torch.exp(torch.log(XI_MAX) * torch.tanh(raw_xi.detach()))
+    df = DF_MIN + (DF_MAX - DF_MIN) * torch.sigmoid(raw_df.detach())
 
-    xi = torch.exp(eta.detach())
-    df = torch.exp(log_df.detach()) + 2.0
-
-    return SkewStudentT(xi, df, x_mean, x_sd)
+    return SkewStudentT(xi.detach(), df.detach(), x_mean, x_sd)
 
 
 def mle_estimation_skewed_normal(
@@ -401,8 +403,3 @@ def mle_estimation_skewed_normal(
         xi = torch.as_tensor(3.0, dtype=dtype)
 
     return SkewNormal(xi, x_mean, x_sd)
-
-
-if __name__ == "__main__":
-    dist = SkewStudentT(torch.tensor([2.0, 3.0]), torch.tensor([3.0, 4.0]))
-    dist.sample((1000,))
