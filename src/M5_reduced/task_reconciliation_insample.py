@@ -5,63 +5,69 @@ from M5_reduced.config import (
     ALPHAs,
     BETAs,
     LOGGING_PATH,
+    VERSION,
+    SAMPLE_SIZE,
+    VAL_SAMPLE_SIZE,
+    LR,
+    DISTS,
+    MAX_ITER,
 )
 from opt_rec_quantile.model import QOptRec
-from utils import SkewNormal
+from utils import SkewStudentT
 
 import torch
 from torch.distributions import Normal
 
-LR = 1e-5
-SAMPLE_SIZE = {
-    alpha: (3000 if alpha in [0.005, 0.025, 0.975, 0.995] else 500) for alpha in ALPHAs
-}
-VAL_SAMPLE_SIZE = 5000
-MAX_ITER = 500
-VERSION = 20260736
-
 for alpha in ALPHAs:
-    for idx, dist in enumerate(["normal"]):
+    for idx, dist in enumerate(DISTS):
         for beta in BETAs:
             seed = VERSION + int(alpha * 1000) + beta * 10000 + idx
 
             @task
             def task_perform_reconciliation(
                 train_data: Annotated[dict, data_catalog["train_data"]],
-                output: Annotated[dict, Product] = data_catalog[
-                    f"rf_{alpha}_{beta}_{dist}"
-                ],
                 alpha: float = [alpha],
                 beta: int = beta,
                 dist: str = dist,
+                output: Annotated[dict, Product] = data_catalog[
+                    f"rf_{alpha}_{beta}_{dist}_insample"
+                ],
                 seed: int = seed,
             ) -> None:
 
                 torch.manual_seed(seed)
 
-                all_slice = range(train_data["mean"].shape[0])
-                normal_loc, normal_scale = train_data["normal"]
-                sn_xi, sn_loc, sn_scale = train_data["skewnormal"]
+                mean = train_data["mean"][0]
+                T, n = mean.shape
+                all_slice = range(T)
+                loc = train_data["in-sample"]["loc"]
+                scale = train_data["in-sample"]["scale"]
+                xi = train_data["in-sample"]["xi"]
+                df = train_data["in-sample"]["df"]
 
                 def sampling(dist: str, smp_slice, size: int = SAMPLE_SIZE[alpha[0]]):
-
                     if dist == "normal":
                         smps = (
-                            Normal(normal_loc[smp_slice], normal_scale[smp_slice])
+                            Normal(loc[smp_slice], scale[smp_slice])
                             .sample((size,))
                             .permute((1, 2, 0))
                         )
-                    elif dist == "skewnormal":
+                    elif dist == "skew":
                         smps = (
-                            SkewNormal(
-                                sn_xi[smp_slice], sn_loc[smp_slice], sn_scale[smp_slice]
+                            SkewStudentT(
+                                xi[smp_slice],
+                                df[smp_slice],
+                                loc[smp_slice],
+                                scale[smp_slice],
                             )
                             .sample((size,))
                             .permute((1, 2, 0))
                         )
-                    return train_data["mean"][smp_slice, :, None] + smps
+                    else:
+                        raise ValueError(f"{dist} not supported")
+                    return mean[smp_slice, :, None] + smps
 
-                train_slice = all_slice[:-28]
+                train_slice = all_slice[: -28 * 3]
                 val_slice = all_slice[-28 * 3 :]
                 model_normal = QOptRec(
                     train_data["A"],
@@ -84,27 +90,33 @@ for alpha in ALPHAs:
                     source_indices = select_source(val_slice, local_indices)
                     return sampling(dist, source_indices, VAL_SAMPLE_SIZE)
 
+                G_init = train_data["in-sample"]["G"]["wls"]
                 G, d = model_normal.train(
-                    train_data["y"][train_slice],
+                    train_data["y"][0][train_slice],
                     train_sampling,
-                    G=train_data["G_wls"],
+                    G=G_init,
                     weights=train_data["weights"],
                     sampling_val=val_sampling,
-                    y_val=train_data["y"][val_slice],
+                    y_val=train_data["y"][0][val_slice],
                     max_iter=MAX_ITER,
                     log_dir=LOGGING_PATH
-                    / f"alpha{int(alpha[0]*1000)}"
-                    / f"beta{beta}"
-                    / f"lr{int(LR*10000)}_{VERSION}",
+                    / f"{VERSION}"
+                    / f"insample-{dist}-alpha{int(alpha[0]*1000)}"
+                    / f"beta{beta}",
                 )
                 output.save({"mdl": model_normal, "result": (G, d)})
 
 
 if __name__ == "__main__":
+    alpha = 0.165
+    beta = 100
+    dist = "skew"
+    idx = 0 if dist == "skew" else 1
+    seed = VERSION + int(alpha * 1000) + beta * 10000
     task_perform_reconciliation(
         data_catalog["train_data"].load(),
-        alpha=[0.005],
+        alpha=[alpha],
         beta=100,
-        seed=42,
-        dist="normal",
+        seed=seed,
+        dist=dist,
     )

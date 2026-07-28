@@ -19,6 +19,15 @@ data_catalog = DataCatalog(name="M5_reduced")
 M5_PATH = Path(
     "/Users/bohan/Library/CloudStorage/Nextcloud-bohan@nc․bohan-zhang․com/Documents/datasets/m5-forecasting-accuracy",
 )
+VERSION = 20260738
+LR = 1e-5
+SAMPLE_SIZE = {
+    alpha: (3000 if alpha in [0.005, 0.025, 0.975, 0.995] else 500) for alpha in ALPHAs
+}
+VAL_SAMPLE_SIZE = 5000
+MAX_ITER = 500
+OUTSAMPLE_H = [0, 7, 14, 21]
+DISTS = ["skew", "normal"]
 
 import torch
 

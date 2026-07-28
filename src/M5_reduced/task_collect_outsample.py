@@ -5,6 +5,8 @@ import pandas as pd
 import torch
 from pytask import Product, task
 from torch.utils.tensorboard import SummaryWriter
+from torch.distributions import Normal
+from utils import SkewStudentT
 
 from M5_reduced.config import (
     DEVICE,
@@ -15,8 +17,10 @@ from M5_reduced.config import (
     ALPHAs,
     BETAs,
     data_catalog,
+    OUTSAMPLE_H,
+    DISTS,
 )
-from M5_reduced.task_reconciliation import VERSION
+from M5_reduced.task_reconciliation_insample import VERSION
 
 
 def style(df, methods):
@@ -50,10 +54,16 @@ def style(df, methods):
     return latex
 
 
-for idx, dist in enumerate(["normal"]):
+for idx, dist in enumerate(DISTS):
     seed = 20260720 + idx
     rf = {
-        alpha: {beta: data_catalog[f"rf_{alpha}_{beta}_{dist}"] for beta in BETAs}
+        alpha: {
+            beta: [
+                data_catalog[f"rf_{alpha}_{beta}_{dist}_outsample_h{h}"]
+                for h in OUTSAMPLE_H
+            ]
+            for beta in BETAs
+        }
         for alpha in ALPHAs
     }
 
@@ -61,19 +71,28 @@ for idx, dist in enumerate(["normal"]):
     def task_collect(
         input_rf: Annotated[dict, rf],
         input_data: Annotated[dict, data_catalog["test_data"]],
-        output: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}.tex",
-        output_spl: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_spl_{dist}.tex",
-        output_df: Annotated[Path, Product] = LOGGING_PATH / f"M5_ets_{dist}.csv",
+        output: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}_outsample.tex",
+        output_spl: Annotated[Path, Product] = TABLES_PATH
+        / f"M5_ets_spl_{dist}_outsample.tex",
+        output_df: Annotated[Path, Product] = LOGGING_PATH
+        / f"M5_ets_{dist}_outsample.csv",
         dist: str = dist,
         seed: int = seed,
     ):
         torch.manual_seed(seed)
 
+        loc = input_data["out-of-sample"]["loc"]
+        scale = input_data["out-of-sample"]["scale"]
+        xi = input_data["out-of-sample"]["xi"]
+        df = input_data["out-of-sample"]["df"]
+
         def sampling(dist: str, size: int = OUTPUT_SAMPLE_SIZE):
             if dist == "normal":
-                smps = input_data["normal"].sample((size,)).permute((1, 0))
-            elif dist == "skewnormal":
-                smps = input_data["skewnormal"].sample((size,)).permute((1, 0))
+                smps = Normal(loc, scale).sample((size,)).permute((1, 2, 0))
+            elif dist == "skew":
+                smps = (
+                    SkewStudentT(xi, df, loc, scale).sample((size,)).permute((1, 2, 0))
+                )
             smps = smps.to(dtype=DTYPE, device=DEVICE)
             return input_data["mean"][:, :, None] + smps
 
@@ -84,17 +103,39 @@ for idx, dist in enumerate(["normal"]):
         qf = {}
         for alpha in ALPHAs:
             qf[alpha] = {"base": torch.quantile(smps, alpha, dim=2)}
-        for m, g in input_data["G"].items():
-            rf_smps = torch.einsum("kn,TnJ->TkJ", S @ g, smps)
+
+        for m in ["sam", "shr", "wls", "ols"]:
+            rf_smps = torch.stack(
+                [
+                    torch.einsum(
+                        "kn,nJ->kJ",
+                        S @ input_data["out-of-sample"]["G"][h_][m],
+                        smps[h_, :, :],
+                    )
+                    for h_ in range(28)
+                ]
+            )
             for alpha in ALPHAs:
                 qf[alpha][m] = torch.quantile(rf_smps, alpha, dim=2)
+
         for beta in BETAs:
             for alpha in ALPHAs:
-                g, d = input_rf[alpha][beta]["result"]
-                rf_smps = (
-                    torch.einsum("kn,TnJ->TkJ", S @ g, smps)
-                    + (S @ d[:, 0])[None, :, None]
-                )
+                rf_smps = []
+                for idx, h_ in enumerate(OUTSAMPLE_H):
+                    g, d = input_rf[alpha][beta][idx]["result"]
+                    if idx == len(OUTSAMPLE_H) - 1:
+                        rf_smps.append(
+                            torch.einsum("kn,TnJ->TkJ", S @ g, smps[h_:])
+                            + (S @ d[:, 0])[None, :, None]
+                        )
+                    else:
+                        rf_smps.append(
+                            torch.einsum(
+                                "kn,TnJ->TkJ", S @ g, smps[h_ : OUTSAMPLE_H[idx + 1]]
+                            )
+                            + (S @ d[:, 0])[None, :, None]
+                        )
+                rf_smps = torch.concat(rf_smps)
                 m = f"QOpt($\\beta={beta}$)"
                 qf[alpha][m] = torch.quantile(rf_smps, alpha, dim=2)
 
@@ -183,24 +224,33 @@ for idx, dist in enumerate(["normal"]):
         df_alpha = df.groupby(["h", "method", "alpha"]).mean(numeric_only=True)["loss"]
         df_m = df.groupby(["method", "alpha"]).mean(numeric_only=True)["loss"]
         for idx, m in enumerate(methods):
-            writer = SummaryWriter(LOGGING_PATH / methods_n[idx] / str(VERSION))
-            for alpha in ALPHAs:
-                for h in range(1, 29):
+            writer = SummaryWriter(
+                LOGGING_PATH
+                / str(VERSION)
+                / f"outsample-{dist}-metrics"
+                / methods_n[idx]
+            )
+            for idx, alpha in enumerate(ALPHAs):
+                for h_ in range(1, 29):
                     writer.add_scalar(
-                        f"Loss/alpha{int(alpha*1000)}", df_alpha[(h, m, alpha)], h - 1
+                        f"test/by-h-alpha{int(alpha*1000)}",
+                        df_alpha[(h_, m, alpha)],
+                        h_ - 1,
                     )
-            if m.startswith("QOpt"):
-                for idx, alpha in enumerate(ALPHAs):
-                    writer.add_scalar("test/by-alpha", float(df_m[(m, alpha)]), idx)
+                writer.add_scalar("test/by-alpha", float(df_m[(m, alpha)]), idx)
             writer.close()
 
 
 if __name__ == "__main__":
-    for idx, dist in enumerate(["normal"]):
+    for idx, dist in enumerate(["skew", "normal"]):
         seed = 20260720 + idx
         rf = {
             alpha: {
-                beta: data_catalog[f"rf_{alpha}_{beta}_{dist}"].load() for beta in BETAs
+                beta: [
+                    data_catalog[f"rf_{alpha}_{beta}_{dist}_outsample_h{h}"].load()
+                    for h in OUTSAMPLE_H
+                ]
+                for beta in BETAs
             }
             for alpha in ALPHAs
         }
