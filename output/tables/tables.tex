@@ -4,39 +4,62 @@
 \begin{document}
 
 
+
 \begin{table}
-\caption{Scaled Pinball Loss by $\alpha$, Normal, ETS, $G_{\text{init}}=G_{\text{shr}}$ }
+\caption{Weighted Scaled Pinball Loss by $\alpha$, Normal, ETS, $G_{\text{init}}= G_{\text{wls}}$, in-sample residuals}
 \resizebox{\textwidth}{!}{
-\input{./M5_ets_normal.tex}}
+\input{./M5_ets_normal_insample.tex}}    
 \end{table}
+
 \begin{table}
-\caption{Scaled Pinball Loss by $\alpha$, SkewNormal, ETS, $G_{\text{init}}= G_{\text{shr}}$}
+\caption{Weighted Scaled Pinball Loss by $\alpha$, Normal, ETS, $G_{\text{init}}= G_{\text{wls}}$, out-of-sample residuals}
 \resizebox{\textwidth}{!}{
-\input{./M5_ets_skewnormal.tex}}
+\input{./M5_ets_normal_outsample.tex}}    
 \end{table}
 
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by level, Normal, ETS, $G_{\text{init}}= G_{\text{wls}}$}
+\caption{Weighted Scaled Pinball Loss by $\alpha$, SkewStudentT, ETS, $G_{\text{init}}= G_{\text{wls}}$, in-sample residuals}
 \resizebox{\textwidth}{!}{
-\input{./M5_ets_spl_normal.tex}}    
-\end{table}
-\begin{table}
-\caption{Weighted Scaled Pinball Loss by level, SkewNormal, ETS,$G_{\text{init}}= G_{\text{wls}}$}
-\resizebox{\textwidth}{!}{
-\input{./M5_ets_spl_normal.tex}}
+\input{./M5_ets_skew_insample.tex}}    
 \end{table}
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by level, Normal, LightGBM, $G_{\text{init}}= G_{\text{ols}}$}
+\caption{Weighted Scaled Pinball Loss by $\alpha$, SkewStudentT, ETS, $G_{\text{init}}= G_{\text{wls}}$, out-of-sample residuals}
 \resizebox{\textwidth}{!}{
-\input{./M5_spl_normal.tex}}
+\input{./M5_ets_skew_outsample.tex}}    
 \end{table}
+
+
 \begin{table}
-\caption{Scaled Pinball Loss by $\alpha$, Normal, LightGBM, $G_{\text{init}}= G_{\text{ols}}$}
+\caption{Weighted Scaled Pinball Loss by level, Normal, out-of-sample, ETS, $G_{\text{init}}= G_{\text{wls}}$}
 \resizebox{\textwidth}{!}{
-\input{./M5_acc_normal.tex}}    
+\input{./M5_ets_spl_normal_outsample.tex}}    
 \end{table}
+
+
+
+\begin{table}
+\caption{Weighted Scaled Pinball Loss by level, SkewStudentT, out-of-sample, ETS,$G_{\text{init}}= G_{\text{wls}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_ets_spl_skew_outsample.tex}}
+\end{table}
+
+
+\begin{table}
+\caption{Weighted Scaled Pinball Loss by level, Normal, in-sample, ETS, $G_{\text{init}}= G_{\text{wls}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_ets_spl_normal_insample.tex}}    
+\end{table}
+
+
+
+\begin{table}
+\caption{Weighted Scaled Pinball Loss by level, SkewStudentT, in-sample, ETS,$G_{\text{init}}= G_{\text{wls}}$}
+\resizebox{\textwidth}{!}{
+\input{./M5_ets_spl_skew_insample.tex}}
+\end{table}
+
 
 
 \end{document}
