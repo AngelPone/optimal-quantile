@@ -11,6 +11,7 @@ from M5_reduced.config import (
     LR,
     DISTS,
     MAX_ITER,
+    INIT,
 )
 from opt_rec_quantile.model import QOptRec
 from utils import SkewStudentT
@@ -90,7 +91,7 @@ for alpha in ALPHAs:
                     source_indices = select_source(val_slice, local_indices)
                     return sampling(dist, source_indices, VAL_SAMPLE_SIZE)
 
-                G_init = train_data["in-sample"]["G"]["wls"]
+                G_init = train_data["in-sample"]["G"][INIT]
                 G, d = model_normal.train(
                     train_data["y"][0][train_slice],
                     train_sampling,

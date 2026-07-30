@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import torch
 import math
-from torch.distributions import StudentT, Normal
+from torch.distributions import Normal, StudentT
 from torch.optim import LBFGS
 from scipy.special import stdtrit
 
@@ -151,6 +151,7 @@ class SkewNormal:
         unif = unif.clamp(eps, 1 - eps)
         return self.q(unif)
 
+    @property
     def moments(self):
         xi = self.xi
         M1 = torch.sqrt(
@@ -168,7 +169,7 @@ class SkewNormal:
     ):
         z = (x - self.loc) / self.scale
         base_dist = Normal(loc=0.0, scale=1.0)
-        mu_xi, sigma_xi = self.moments()
+        mu_xi, sigma_xi = self.moments
         s = sigma_xi * z + mu_xi
         # Piecewise argument of the underlying symmetric Student-t density
         arg = torch.where(s < 0, self.xi * s, s / self.xi)
@@ -194,7 +195,7 @@ class SkewNormal:
         eps = max(torch.finfo(p.dtype).eps, 1e-12)
         p = p.clamp(eps, 1 - eps)
 
-        mu_xi, sigma_xi = self.moments()
+        mu_xi, sigma_xi = self.moments
 
         threshold = 1 / (1 + self.xi**2)
         left_prob = p * (1 + self.xi**2) / 2
@@ -222,30 +223,42 @@ class SkewStudentT:
 
     def __post_init__(self):
         self.xi = torch.as_tensor(self.xi)
-        self.loc = torch.as_tensor(self.loc, dtype=self.xi.dtype)
-        self.df = torch.as_tensor(self.df, dtype=self.xi.dtype)
-        self.scale = torch.as_tensor(self.scale, dtype=self.xi.dtype)
-        if torch.any(self.scale < 0):
-            raise ValueError("scale must be positive")
+        self.df = torch.as_tensor(self.df, dtype=self.xi.dtype, device=self.xi.device)
+        self.loc = torch.as_tensor(self.loc, dtype=self.xi.dtype, device=self.xi.device)
+        self.scale = torch.as_tensor(
+            self.scale, dtype=self.xi.dtype, device=self.xi.device
+        )
+        if torch.any(self.xi <= 0):
+            raise ValueError("xi must be positive")
         if torch.any(self.df <= 2):
-            raise ValueError("df must be > 2 for finite variance.")
-        self.df = torch.as_tensor(self.df, dtype=self.xi.dtype)
+            raise ValueError("df must be > 2 for finite variance")
+        if torch.any(self.scale <= 0):
+            raise ValueError("scale must be positive")
 
-    def prob(self, x: torch.Tensor):
+    def prob(self, x: torch.Tensor | float) -> torch.Tensor:
         return torch.exp(self.log_prob(x))
 
-    def sample(self, size: tuple, generator: torch.Generator | None = None):
-        size = torch.Size(size) + self.xi.shape
-        unif = torch.rand(
-            size,
-            dtype=self.loc.dtype,
-            device=self.loc.device,
-            generator=generator,
-        )
-        eps = max(torch.finfo(unif.dtype).eps, 1e-12)
-        unif = unif.clamp(eps, 1 - eps)
-        return self.q(unif)
+    def sample(
+        self,
+        size: int | tuple[int, ...] = (),
+    ) -> torch.Tensor:
+        if isinstance(size, int):
+            sample_shape = (size,)
+        else:
+            sample_shape = tuple(size)
 
+        magnitude = StudentT(self.df).sample(torch.Size(sample_shape)).abs()
+        threshold = 1 / (1 + self.xi.square())
+        is_left = torch.rand_like(magnitude) < threshold
+        skew_t = torch.where(
+            is_left,
+            -magnitude / self.xi,
+            magnitude * self.xi,
+        )
+        mu_xi, sigma_xi = self.moments
+        return self.loc + self.scale * (skew_t - mu_xi) / sigma_xi
+
+    @property
     def moments(self):
         xi = self.xi
         df = self.df
@@ -262,51 +275,68 @@ class SkewStudentT:
         M2 = df / (df - 2)
         mu_xi = M1 * (xi - 1 / xi)
         var_xi = (M2 - M1**2) * (xi**2 + xi ** (-2)) + 2 * M1**2 - M2
-        sigma_xi = torch.sqrt(var_xi)
-        return mu_xi, sigma_xi
+        var_xi = torch.clamp_min(
+            var_xi,
+            torch.finfo(xi.dtype).tiny,
+        )
+        return mu_xi, torch.sqrt(var_xi)
 
     def log_prob(
         self,
-        x: torch.Tensor,
-    ):
+        x: torch.Tensor | float,
+    ) -> torch.Tensor:
+        x = torch.as_tensor(x, dtype=self.xi.dtype, device=self.xi.device)
         df = self.df
         z = (x - self.loc) / self.scale
-        base_dist = StudentT(df)
-        mu_xi, sigma_xi = self.moments()
+        mu_xi, sigma_xi = self.moments
         s = sigma_xi * z + mu_xi
-        # Piecewise argument of the underlying symmetric Student-t density
         arg = torch.where(s < 0, self.xi * s, s / self.xi)
-        log_norm = torch.log(
-            torch.as_tensor(2.0, dtype=x.dtype, device=x.device)
-        ) - torch.log(self.xi + 1 / self.xi)
+        log_norm = math.log(2.0) - torch.log(self.xi + 1 / self.xi)
         log_density = (
             -torch.log(self.scale)
             + torch.log(sigma_xi)
             + log_norm
-            + base_dist.log_prob(arg)
+            + StudentT(df).log_prob(arg)
         )
         return log_density
 
-    def q(self, x: torch.Tensor):
-        mu_xi, sigma_xi = self.moments()
-        threshold = 1 / (1 + self.xi**2)
-        is_left = x < threshold
-        left_prob = x * (1 + self.xi**2) / 2
-        right_prob = (x * (1 + self.xi**2) + self.xi**2 - 1) / (2 * self.xi**2)
-        branch_prob = torch.where(is_left, left_prob, right_prob)
-        eps = max(torch.finfo(branch_prob.dtype).eps, 1e-12)
-        branch_prob = branch_prob.clamp(eps, 1 - eps)
+    def q(self, p: torch.Tensor | float) -> torch.Tensor:
+        """Return quantiles, using SciPy only for the explicit inverse CDF."""
+        p = torch.as_tensor(p, dtype=self.xi.dtype, device=self.xi.device)
+        eps = max(torch.finfo(p.dtype).eps, 1e-12)
+        p = p.clamp(eps, 1 - eps)
+        p, xi, df = torch.broadcast_tensors(p, self.xi, self.df)
+        threshold = 1 / (1 + xi.square())
+        is_left = p < threshold
+        arg = torch.empty_like(p)
 
-        df, branch_prob = torch.broadcast_tensors(self.df, branch_prob)
-        z = torch.as_tensor(
-            stdtrit(
-                df.detach().cpu().numpy(),
-                branch_prob.detach().cpu().numpy(),
-            ),
-            dtype=x.dtype,
-            device=x.device,
-        )
-        arg = torch.where(is_left, z / self.xi, self.xi * z)
+        if torch.any(is_left):
+            left_prob = p[is_left] * (1 + xi[is_left].square()) / 2
+            left_prob = left_prob.clamp(eps, 1 - eps)
+            left_quantile = stdtrit(
+                df[is_left].detach().cpu().numpy(),
+                left_prob.detach().cpu().numpy(),
+            )
+            arg[is_left] = (
+                torch.as_tensor(left_quantile, dtype=p.dtype, device=p.device)
+                / xi[is_left]
+            )
+
+        is_right = ~is_left
+        if torch.any(is_right):
+            right_prob = (
+                p[is_right] * (1 + xi[is_right].square()) + xi[is_right].square() - 1
+            ) / (2 * xi[is_right].square())
+            right_prob = right_prob.clamp(eps, 1 - eps)
+            right_quantile = stdtrit(
+                df[is_right].detach().cpu().numpy(),
+                right_prob.detach().cpu().numpy(),
+            )
+            arg[is_right] = xi[is_right] * torch.as_tensor(
+                right_quantile, dtype=p.dtype, device=p.device
+            )
+
+        mu_xi, sigma_xi = self.moments
         return self.loc + self.scale * (arg - mu_xi) / sigma_xi
 
 
@@ -315,7 +345,6 @@ def mle_estimation_skewed_dist(samples: np.ndarray, max_iter: int = 20):
 
     x = torch.as_tensor(samples, dtype=dtype)
 
-    # plug-in standardization of the data
     x_mean = x.mean()
     x_sd = x.std(correction=0)
     z = (x - x_mean) / x_sd

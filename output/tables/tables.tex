@@ -1,38 +1,79 @@
 \documentclass{article}
-\usepackage{booktabs, graphicx, xcolor, amsmath}
+\usepackage{booktabs, graphicx, xcolor, amsmath, setspace}
 
+\usepackage{geometry}
+\geometry{a4paper,scale=0.8}
 \begin{document}
+
+\section*{Experiment setting}
+
+The experiment uses a rolling fixed window of \(52\times 7\times 3=1092\)
+days to fit an ETS model for each of the 154 series in the reduced M5
+hierarchy.  Each forecast origin produces a 28-day base forecast.  The final
+forecast origin is held out as the test set; its 28 future observations are
+never used to train the reconciliation models.  For every reconciliation
+problem, the last \(28\times 3=84\) historical forecast origins form the
+validation set, and all earlier eligible origins form the training set.  The
+in-sample experiment therefore uses 765 training origins and 84 validation
+origins.  At the four out-of-sample anchor horizons, the corresponding
+training-set sizes are 765, 758, 751, and 744 origins; every anchor retains
+84 origins for validation.  The reconciliation matrix is initialized with the shrinkage estimator,
+\(G_{\mathrm{init}}=G_{\mathrm{shr}}\).
+
+Two residual constructions are considered.  The \emph{in-sample} residuals
+are the one-step fitted residuals from each ETS training window.  Their
+distribution parameters therefore vary across forecast origins.  A single
+reconciliation model is trained using the one-step-ahead problem and is
+applied to all 28 test horizons.  The \emph{out-of-sample} residuals are the
+historical realized forecast errors \(y_{t+h}-\widehat y_{t+h\mid t}\), fitted
+separately for each horizon \(h=1,\ldots,28\).  Reconciliation models are
+trained at horizons \(h\in\{1,8,15,22\}\) and applied respectively to the test
+horizon blocks \(1{:}7\), \(8{:}14\), \(15{:}21\), and \(22{:}28\).
+
+For both residual constructions, two marginal distributions are evaluated.
+The Normal specification uses the residual mean and standard deviation as
+its location and scale.  The SkewStudentT specification uses the same
+location and scale and estimates the skewness parameter \(\xi\) and degrees
+of freedom \(\nu\) by maximum likelihood.  Monte Carlo residual draws are
+added to the ETS point forecasts before reconciliation.  Reconciliation
+training uses 3000 draws for
+\(\alpha\in\{0.005,0.025,0.975,0.995\}\) and 500 draws for the remaining
+quantiles; validation and test evaluation use 5000 and 10000 draws,
+respectively.  Results are reported at
+\(\alpha\in\{0.005,0.025,0.165,0.25,0.5,0.75,0.835,0.975,0.995\}\). 
+
+
 
 
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by $\alpha$, Normal, ETS, $G_{\text{init}}= G_{\text{wls}}$, in-sample residuals}
+\caption{SPL by $\alpha$, Normal, ETS, $G_{\text{init}}= G_{\text{shr}}$, in-sample residuals}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_normal_insample.tex}}    
 \end{table}
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by $\alpha$, Normal, ETS, $G_{\text{init}}= G_{\text{wls}}$, out-of-sample residuals}
+\caption{SPL by $\alpha$, Normal, ETS, $G_{\text{init}}= G_{\text{shr}}$, out-of-sample residuals}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_normal_outsample.tex}}    
 \end{table}
 
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by $\alpha$, SkewStudentT, ETS, $G_{\text{init}}= G_{\text{wls}}$, in-sample residuals}
+\caption{SPL by $\alpha$, SkewStudentT, ETS, $G_{\text{init}}= G_{\text{shr}}$, in-sample residuals}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_skew_insample.tex}}    
 \end{table}
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by $\alpha$, SkewStudentT, ETS, $G_{\text{init}}= G_{\text{wls}}$, out-of-sample residuals}
+\caption{SPL by $\alpha$, SkewStudentT, ETS, $G_{\text{init}}= G_{\text{shr}}$, out-of-sample residuals}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_skew_outsample.tex}}    
 \end{table}
 
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by level, Normal, out-of-sample, ETS, $G_{\text{init}}= G_{\text{wls}}$}
+\caption{Weighted SPL by level, Normal, out-of-sample, ETS, $G_{\text{init}}= G_{\text{shr}}$}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_spl_normal_outsample.tex}}    
 \end{table}
@@ -40,14 +81,14 @@
 
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by level, SkewStudentT, out-of-sample, ETS,$G_{\text{init}}= G_{\text{wls}}$}
+\caption{Weighted SPL by level, SkewStudentT, out-of-sample, ETS,$G_{\text{init}}= G_{\text{shr}}$}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_spl_skew_outsample.tex}}
 \end{table}
 
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by level, Normal, in-sample, ETS, $G_{\text{init}}= G_{\text{wls}}$}
+\caption{Weighted SPL by level, Normal, in-sample, ETS, $G_{\text{init}}= G_{\text{shr}}$}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_spl_normal_insample.tex}}    
 \end{table}
@@ -55,7 +96,7 @@
 
 
 \begin{table}
-\caption{Weighted Scaled Pinball Loss by level, SkewStudentT, in-sample, ETS,$G_{\text{init}}= G_{\text{wls}}$}
+\caption{Weighted SPL by level, SkewStudentT, in-sample, ETS,$G_{\text{init}}= G_{\text{shr}}$}
 \resizebox{\textwidth}{!}{
 \input{./M5_ets_spl_skew_insample.tex}}
 \end{table}
