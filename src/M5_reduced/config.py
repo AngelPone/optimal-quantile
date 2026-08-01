@@ -8,21 +8,22 @@ TABLES_PATH = PROJECT_ROOT / "output" / "tables"
 OUTPUT_PATH = PROJECT_ROOT / "output" / "M5_reduced"
 DATA_OUTPUT_PATH = OUTPUT_PATH / "prepared.pkl"
 
-TEST_WINDOWS = 1
+TEST_WINDOWS = 365
 FORECAST_HORIZON = 28
-WINDOW_S = 52 * 7 * 3
+WINDOW_S = 52 * 7 * 2
 
 ALPHAs = [0.005, 0.025, 0.165, 0.25, 0.5, 0.75, 0.835, 0.975, 0.995]
-OUTPUT_SAMPLE_SIZE = 10000
+OUTPUT_SAMPLE_SIZE = 5000
+OUTSAMPLE_EVALUATION_BATCH_SIZE = 16
 BETAs = [100]
 data_catalog = DataCatalog(name="M5_reduced")
 M5_PATH = Path(
     "/Users/bohan/Library/CloudStorage/Nextcloud-bohan@nc․bohan-zhang․com/Documents/datasets/m5-forecasting-accuracy",
 )
-VERSION = 20260739
-LR = 1e-5
+VERSION = 20260801
+LR = 1e-4
 SAMPLE_SIZE = {
-    alpha: (3000 if alpha in [0.005, 0.025, 0.975, 0.995] else 500) for alpha in ALPHAs
+    alpha: (1000 if alpha in [0.005, 0.025, 0.975, 0.995] else 500) for alpha in ALPHAs
 }
 VAL_SAMPLE_SIZE = 5000
 MAX_ITER = 500

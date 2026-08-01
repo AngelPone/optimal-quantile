@@ -23,7 +23,7 @@ for alpha in ALPHAs:
     for idx, dist in enumerate(DISTS):
         for beta in BETAs:
             for h in [0, 7, 14, 21]:
-                seed = VERSION + int(alpha * 1000) + beta * 10000 + idx
+                seed = VERSION + int(alpha * 1000) + beta * 10000 + idx + h
 
                 @task
                 def task_perform_reconciliation(
@@ -43,10 +43,10 @@ for alpha in ALPHAs:
                     mean = train_data["mean"][h]
                     T, n = mean.shape
                     all_slice = range(T)
-                    loc = train_data["out-of-sample"]["loc"][h,].expand((T, n))
-                    scale = train_data["out-of-sample"]["scale"][h,].expand((T, n))
-                    xi = train_data["out-of-sample"]["xi"][h,].expand((T, n))
-                    df = train_data["out-of-sample"]["df"][h,].expand((T, n))
+                    loc = train_data["out-of-sample"]["loc"][h]
+                    scale = train_data["out-of-sample"]["scale"][h]
+                    xi = train_data["out-of-sample"]["xi"][h]
+                    df = train_data["out-of-sample"]["df"][h]
 
                     def sampling(
                         dist: str, smp_slice, size: int = SAMPLE_SIZE[alpha[0]]

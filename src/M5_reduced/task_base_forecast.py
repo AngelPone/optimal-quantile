@@ -1,4 +1,4 @@
-from utils import FixedWindowIterator, mle_estimation_skewed_normal
+from utils import ExpandingWindowIterator, mle_estimation_skewed_normal
 from typing import Annotated
 from M5_reduced.config import (
     data_catalog,
@@ -23,37 +23,29 @@ def task_base_forecast(
 
     T = data["data"]["Total"][1].shape[0]
     output = []
-    for train_slice, test_slice in FixedWindowIterator(T, WINDOW_S, FORECAST_HORIZON):
+    for train_slice, test_slice in ExpandingWindowIterator(
+        T, WINDOW_S, FORECAST_HORIZON, var_h=True
+    ):
         mean = []
         resids = []
-        skewnormal = []
-        normals = []
         futures = []
         hist = []
         for series in data["names"]:
             train = data["data"][series][1].values[train_slice]
             hist.append(train)
             futures.append(data["data"][series][1].values[test_slice])
-            X_train = data["data"][series][0].values[train_slice]
-            X_pred = data["data"][series][0].values[test_slice]
             mdl = AutoETS(season_length=7)
-            mdl.fit(train, X_train)
-            fcasts = mdl.predict(h=FORECAST_HORIZON, X=X_pred)["mean"]
+            mdl.fit(train)
+            horizon = test_slice.stop - test_slice.start
+            fcasts = mdl.predict(h=horizon)["mean"]
             resid = train - mdl.predict_in_sample()["fitted"]
-            dist = mle_estimation_skewed_normal(resid)
-            normal = torch.distributions.Normal(resid.mean(), resid.std())
-            mean.append(fcasts)
-            resids.append(resid)
-            skewnormal.append(dist)
-            normals.append(normal)
+            mean.append(fcasts[:, None])
+            resids.append(resid[:, None])
         output.append(
             {
-                "mean": torch.as_tensor(mean, dtype=torch.float64),
-                "normal": normals,
-                "skewnormal": skewnormal,
-                "resid": np.stack(resids, axis=1),
-                "hist": np.stack(hist, axis=1),
-                "future": np.stack(futures, axis=1),
+                "mean": np.concat(mean, axis=1),
+                "resid": np.concat(resids, axis=1),
+                "slice": (train_slice, test_slice),
             }
         )
 

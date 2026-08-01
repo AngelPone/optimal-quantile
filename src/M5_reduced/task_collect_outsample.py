@@ -4,7 +4,6 @@ from typing import Annotated
 import pandas as pd
 import torch
 from pytask import Product, task
-from torch.utils.tensorboard import SummaryWriter
 from torch.distributions import Normal
 from utils import SkewStudentT
 
@@ -13,6 +12,7 @@ from M5_reduced.config import (
     DTYPE,
     LOGGING_PATH,
     OUTPUT_SAMPLE_SIZE,
+    OUTSAMPLE_EVALUATION_BATCH_SIZE,
     TABLES_PATH,
     ALPHAs,
     BETAs,
@@ -20,7 +20,29 @@ from M5_reduced.config import (
     OUTSAMPLE_H,
     DISTS,
 )
-from M5_reduced.task_reconciliation_insample import VERSION
+
+
+def mean_losses_over_batches(n_windows, batch_size, evaluate_batch):
+    loss_sums = {}
+    n_processed = 0
+    expected_keys = None
+    for start in range(0, n_windows, batch_size):
+        stop = min(start + batch_size, n_windows)
+        batch_losses = evaluate_batch(slice(start, stop))
+        batch_keys = set(batch_losses)
+        if expected_keys is None:
+            expected_keys = batch_keys
+        elif batch_keys != expected_keys:
+            raise ValueError("evaluate_batch returned inconsistent loss keys")
+
+        for key, loss in batch_losses.items():
+            if loss.shape[0] != stop - start:
+                raise ValueError("batch loss has an inconsistent first dimension")
+            batch_sum = loss.sum(dim=0)
+            loss_sums[key] = loss_sums.get(key, 0) + batch_sum
+        n_processed += stop - start
+
+    return {key: loss_sum / n_processed for key, loss_sum in loss_sums.items()}
 
 
 def style(df, methods):
@@ -54,26 +76,30 @@ def style(df, methods):
     return latex
 
 
+def spl(x, alpha, weights):
+    loss = torch.where(x < 0, -(1 - alpha) * x, alpha * x)
+    return loss / weights
+
+
 for idx, dist in enumerate(DISTS):
     seed = 20260720 + idx
     rf = {
         alpha: {
-            beta: [
-                data_catalog[f"rf_{alpha}_{beta}_{dist}_outsample_h{h}"]
+            beta: {
+                h: data_catalog[f"rf_{alpha}_{beta}_{dist}_outsample_h{h}"]
                 for h in OUTSAMPLE_H
-            ]
+            }
             for beta in BETAs
         }
         for alpha in ALPHAs
     }
 
     @task
+    @torch.no_grad()
     def task_collect(
         input_rf: Annotated[dict, rf],
         input_data: Annotated[dict, data_catalog["test_data"]],
         output: Annotated[Path, Product] = TABLES_PATH / f"M5_ets_{dist}_outsample.tex",
-        output_spl: Annotated[Path, Product] = TABLES_PATH
-        / f"M5_ets_spl_{dist}_outsample.tex",
         output_df: Annotated[Path, Product] = LOGGING_PATH
         / f"M5_ets_{dist}_outsample.csv",
         dist: str = dist,
@@ -81,12 +107,7 @@ for idx, dist in enumerate(DISTS):
     ):
         torch.manual_seed(seed)
 
-        loc = input_data["out-of-sample"]["loc"]
-        scale = input_data["out-of-sample"]["scale"]
-        xi = input_data["out-of-sample"]["xi"]
-        df = input_data["out-of-sample"]["df"]
-
-        def sampling(dist: str, size: int = OUTPUT_SAMPLE_SIZE):
+        def sampling(loc, scale, xi, df, mean, size: int = OUTPUT_SAMPLE_SIZE):
             if dist == "normal":
                 smps = Normal(loc, scale).sample((size,)).permute((1, 2, 0))
             elif dist == "skew":
@@ -94,75 +115,87 @@ for idx, dist in enumerate(DISTS):
                     SkewStudentT(xi, df, loc, scale).sample((size,)).permute((1, 2, 0))
                 )
             smps = smps.to(dtype=DTYPE, device=DEVICE)
-            return input_data["mean"][:, :, None] + smps
+            return mean[:, :, None] + smps
 
-        smps = sampling(dist)
         A = input_data["A"]
         S = torch.concat([A, torch.eye(A.shape[1], dtype=A.dtype, device=A.device)])
+        alpha_tensor = torch.tensor(ALPHAs, dtype=DTYPE, device=DEVICE)
 
-        qf = {}
-        for alpha in ALPHAs:
-            qf[alpha] = {"base": torch.quantile(smps, alpha, dim=2)}
-
-        for m in ["sam", "shr", "wls", "ols"]:
-            rf_smps = torch.stack(
-                [
-                    torch.einsum(
-                        "kn,nJ->kJ",
-                        S @ input_data["out-of-sample"]["G"][h_][m],
-                        smps[h_, :, :],
-                    )
-                    for h_ in range(28)
-                ]
-            )
-            for alpha in ALPHAs:
-                qf[alpha][m] = torch.quantile(rf_smps, alpha, dim=2)
-
-        for beta in BETAs:
-            for alpha in ALPHAs:
-                rf_smps = []
-                for idx, h_ in enumerate(OUTSAMPLE_H):
-                    g, d = input_rf[alpha][beta][idx]["result"]
-                    if idx == len(OUTSAMPLE_H) - 1:
-                        rf_smps.append(
-                            torch.einsum("kn,TnJ->TkJ", S @ g, smps[h_:])
-                            + (S @ d[:, 0])[None, :, None]
-                        )
-                    else:
-                        rf_smps.append(
-                            torch.einsum(
-                                "kn,TnJ->TkJ", S @ g, smps[h_ : OUTSAMPLE_H[idx + 1]]
-                            )
-                            + (S @ d[:, 0])[None, :, None]
-                        )
-                rf_smps = torch.concat(rf_smps)
-                m = f"QOpt($\\beta={beta}$)"
-                qf[alpha][m] = torch.quantile(rf_smps, alpha, dim=2)
-
-        def spl(x, alpha, weights):
-            loss = torch.where(x < 0, -(1 - alpha) * x, alpha * x)
-            return loss / weights
-
-        true_y = input_data["y"]
         dfs = []
-        for alpha in ALPHAs:
-            for method, q in qf[alpha].items():
-                loss = spl(true_y - q, alpha, input_data["weights"]).cpu().numpy()
-                df = pd.DataFrame(loss.T)
-                df.columns = [i for i in range(1, 29)]
-                df["method"] = method
-                df["alpha"] = alpha
-                df["idx"] = range(S.shape[0])
-                dfs.append(df)
-        dfs = pd.concat(dfs)
-        df = pd.melt(
-            dfs,
-            id_vars=["method", "alpha", "idx"],
-            value_vars=range(1, 29),
-            value_name="loss",
-            var_name="h",
-        )
+        for h in range(28):
+            loc = input_data["out-of-sample"]["loc"][h]
+            scale = input_data["out-of-sample"]["scale"][h]
+            xi = input_data["out-of-sample"]["xi"][h]
+            df = input_data["out-of-sample"]["df"][h]
+            mean = input_data["mean"][h]
+            true_y = input_data["y"][h]
+            benchmark_matrices = {
+                m: S @ input_data["out-of-sample"]["G"][h][m]
+                for m in ["sam", "shr", "wls", "ols"]
+            }
+            qopt_transforms = {}
+            for beta in BETAs:
+                m = f"QOpt($\\beta={beta}$)"
+                for alpha in ALPHAs:
+                    h_ = h // 7 * 7
+                    g, d = input_rf[alpha][beta][h_]["result"]
+                    qopt_transforms[(m, alpha)] = (
+                        S @ g,
+                        (S @ d[:, 0])[None, :, None],
+                    )
 
+            def evaluate_batch(batch):
+                smps = sampling(
+                    loc[batch],
+                    scale[batch],
+                    xi[batch],
+                    df[batch],
+                    mean[batch],
+                )
+
+                qf = {"base": torch.quantile(smps, alpha_tensor, dim=2)}
+                for m, matrix in benchmark_matrices.items():
+                    rf_smps = torch.einsum("kn,TnJ->TkJ", matrix, smps)
+                    qf[m] = torch.quantile(rf_smps, alpha_tensor, dim=2)
+
+                for beta in BETAs:
+                    m = f"QOpt($\\beta={beta}$)"
+                    qs = []
+                    for alpha in ALPHAs:
+                        matrix, bias = qopt_transforms[(m, alpha)]
+                        rf_smps = torch.einsum("kn,TnJ->TkJ", matrix, smps) + bias
+                        qs.append(torch.quantile(rf_smps, alpha, dim=2))
+                    qf[m] = torch.stack(qs)
+
+                return {
+                    (method, alpha): spl(
+                        true_y[batch] - q[alpha_idx],
+                        alpha,
+                        input_data["weights"],
+                    )
+                    for alpha_idx, alpha in enumerate(ALPHAs)
+                    for method, q in qf.items()
+                }
+
+            mean_losses = mean_losses_over_batches(
+                n_windows=true_y.shape[0],
+                batch_size=OUTSAMPLE_EVALUATION_BATCH_SIZE,
+                evaluate_batch=evaluate_batch,
+            )
+            for (method, alpha), loss in mean_losses.items():
+                dfs.append(
+                    pd.DataFrame(
+                        {
+                            "method": method,
+                            "alpha": alpha,
+                            "h": h,
+                            "loss": loss.cpu().numpy(),
+                            "idx": range(S.shape[0]),
+                        }
+                    )
+                )
+
+        df = pd.concat(dfs)
         df.to_csv(output_df)
         df1 = (
             df.groupby(["method", "alpha"])
@@ -179,80 +212,16 @@ for idx, dist in enumerate(DISTS):
         df1 = style(df1, methods)
         output.write_text(df1)
 
-        df2 = (
-            df.merge(input_data["m5_weights"], on="idx", how="left")
-            .groupby(["method", "level", "idx"])[["loss", "weights"]]
-            .mean()
+        df_ = (
+            df.groupby(["h", "method", "alpha"])
+            .mean(numeric_only=True)["loss"]
             .reset_index()
         )
-        df2["spl"] = df2["loss"] * df2["weights"]
-        df2 = (
-            df2.groupby(["method", "level"])[["spl"]]
-            .sum()
-            .reset_index()
-            .pivot(index="method", columns="level", values="spl")
-            .sort_index(axis=1)
-            .reset_index()
-        )
-        benchmark = pd.DataFrame(
-            [
-                [
-                    "ARIMA",
-                    0.158,
-                    0.148,
-                    0.163,
-                    0.147,
-                    0.167,
-                    0.170,
-                    0.202,
-                    0.178,
-                    0.201,
-                ]
-            ],
-            columns=["method"] + [f"level{i}" for i in range(1, 10)],
-        )
-        df2 = pd.concat([df2, benchmark], ignore_index=True)
-        df2["Average"] = df2[[f"level{level}" for level in range(1, 10)]].mean(axis=1)
-        df2.set_index("method", inplace=True)
-        df2 = style(df2, ["ARIMA"] + methods)
-        output_spl.write_text(df2)
-
-        methods_n = (
-            ["base"] + [f"QOpt_{beta}" for beta in BETAs] + ["ols", "wls", "shr", "sam"]
-        )
-
-        df_alpha = df.groupby(["h", "method", "alpha"]).mean(numeric_only=True)["loss"]
-        df_m = df.groupby(["method", "alpha"]).mean(numeric_only=True)["loss"]
-        for idx, m in enumerate(methods):
-            writer = SummaryWriter(
-                LOGGING_PATH
-                / str(VERSION)
-                / f"outsample-{dist}-metrics"
-                / methods_n[idx]
+        for h in OUTSAMPLE_H:
+            output_path = TABLES_PATH / f"M5_ets_{dist}_h{h}_outsample.tex"
+            dfh = df_[df_["h"] == h].pivot(
+                index="method", columns="alpha", values="loss"
             )
-            for idx, alpha in enumerate(ALPHAs):
-                for h_ in range(1, 29):
-                    writer.add_scalar(
-                        f"test/by-h-alpha{int(alpha*1000)}",
-                        df_alpha[(h_, m, alpha)],
-                        h_ - 1,
-                    )
-                writer.add_scalar("test/by-alpha", float(df_m[(m, alpha)]), idx)
-            writer.close()
-
-
-if __name__ == "__main__":
-    for idx, dist in enumerate(["skew", "normal"]):
-        seed = 20260720 + idx
-        rf = {
-            alpha: {
-                beta: [
-                    data_catalog[f"rf_{alpha}_{beta}_{dist}_outsample_h{h}"].load()
-                    for h in OUTSAMPLE_H
-                ]
-                for beta in BETAs
-            }
-            for alpha in ALPHAs
-        }
-        input_data = data_catalog["test_data"].load()
-        task_collect(rf, input_data, dist=dist, seed=seed)
+            dfh.columns = [f"{i:.3f}" for i in dfh.columns]
+            dfh = style(dfh, methods)
+            output_path.write_text(dfh)
