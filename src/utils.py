@@ -30,6 +30,7 @@ class ExpandingWindowIterator:
     S: int
     h: int
     dataset: Any | None = None
+    var_h: bool = False
 
     def __post_init__(self) -> None:
         if self.dataset is not None:
@@ -49,7 +50,10 @@ class ExpandingWindowIterator:
             raise ValueError("S + h must be less than or equal to T.")
 
     def __len__(self) -> int:
-        return self.T - self.S - self.h + 1
+        if not self.var_h:
+            return self.T - self.S - self.h + 1
+        else:
+            return self.T - self.S
 
     def __iter__(self) -> Iterator[tuple[Any, Any]]:
         for idx in range(len(self)):
@@ -94,7 +98,7 @@ class ExpandingWindowIterator:
             raise IndexError("expanding-window index out of range.")
 
         split = self.S + idx
-        return slice(0, split), slice(split, split + self.h)
+        return slice(0, split), slice(split, min(split + self.h, self.T))
 
 
 class FixedWindowIterator(ExpandingWindowIterator):

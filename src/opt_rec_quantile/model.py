@@ -1,7 +1,7 @@
 import torch
 from opt_rec_quantile.loss import ApproxPinballLoss, approx_pinball_loss, pinball_loss
 from typing import Callable
-from torch.optim.lr_scheduler import ExponentialLR, ConstantLR, SequentialLR, OneCycleLR
+from torch.optim.lr_scheduler import MultiplicativeLR
 from torch.utils.tensorboard import SummaryWriter
 from pathlib import Path
 
@@ -133,19 +133,12 @@ class QOptRec:
         optimizer = self.optimizer_cls(
             [
                 {"params": (G,), "lr": optimizer_kwargs["lr"]},
-                {"params": (d,), "lr": optimizer_kwargs["lr"] * 1e4},
+                {"params": (d,), "lr": optimizer_kwargs["lr"] * 1e3},
             ]
         )
 
         best_pinball_loss = float("inf")
-        scheduler = OneCycleLR(
-            optimizer,
-            max_lr=[optimizer_kwargs["lr"] * 10, optimizer_kwargs["lr"] * 1e5],
-            steps_per_epoch=1,
-            epochs=max_iter - 20,
-            div_factor=10,
-            final_div_factor=1e2,
-        )
+        scheduler = MultiplicativeLR(optimizer, lambda epoch: 0.99)
 
         best_G = G.detach().clone()
         best_d = d.detach().clone()
@@ -169,14 +162,6 @@ class QOptRec:
                 loss.backward()
                 optimizer.step()
                 loss_item = loss.detach().item()
-                grad_norm_G = torch.nn.utils.clip_grad_norm_(
-                    G,
-                    max_norm=float("inf"),
-                )
-                grad_norm_d = torch.nn.utils.clip_grad_norm_(
-                    d,
-                    max_norm=float("inf"),
-                )
             else:
                 perm = torch.randperm(y.shape[0], generator=generator)
                 loss_item = 0.0
@@ -185,8 +170,8 @@ class QOptRec:
                     batch_indices = perm[start : start + batch_size]
                     batch_y = y[batch_indices]
                     batch_y_pred = sampling(batch_indices)
-                    optimizer.zero_grad()
                     loss = self._loss(batch_y, batch_y_pred, G, d, weights)
+                    optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
                     bs = batch_y.shape[0]
@@ -202,24 +187,11 @@ class QOptRec:
                     best_pinball_loss = val_pl
                     best_G = G.detach().clone()
                     best_d = d.detach().clone()
-            if step > 19:
-                scheduler.step()
-                writer.add_scalar(
-                    "Debug/Learning_rate_G", scheduler.get_last_lr()[0], step
-                )
-                writer.add_scalar(
-                    "Debug/Learning_rate_d", scheduler.get_last_lr()[1], step
-                )
-            else:
-                writer.add_scalar("Debug/Learning_rate_G", optimizer_kwargs["lr"], step)
-                writer.add_scalar(
-                    "Debug/Learning_rate_d", optimizer_kwargs["lr"] * 1e4, step
-                )
+            scheduler.step()
+            writer.add_scalar("Debug/Learning_rate", scheduler.get_last_lr()[0], step)
 
             writer.add_scalar("Loss/train", loss_item, step)
             writer.add_scalar("Loss/Validation", val_pl, step)
-            writer.add_scalar("Debug/grad_norm_G", grad_norm_G.item(), step)
-            writer.add_scalar("Debug/grad_norm_d", grad_norm_d.item(), step)
 
         self.best_pinball_loss_ = best_pinball_loss
         self.final_G_ = G.detach().clone()

@@ -12,6 +12,7 @@ from M5_reduced.config import (
     LR,
     DISTS,
     INIT,
+    OUTSAMPLE_H,
 )
 from opt_rec_quantile.model import QOptRec
 from utils import SkewStudentT
@@ -22,7 +23,7 @@ from torch.distributions import Normal
 for alpha in ALPHAs:
     for idx, dist in enumerate(DISTS):
         for beta in BETAs:
-            for h in [0, 7, 14, 21]:
+            for h in OUTSAMPLE_H:
                 seed = VERSION + int(alpha * 1000) + beta * 10000 + idx + h
 
                 @task
@@ -108,6 +109,7 @@ for alpha in ALPHAs:
                         / f"{VERSION}"
                         / f"h{h}-outsample-{dist}-alpha{int(alpha[0]*1000)}"
                         / f"beta{beta}",
+                        batch_size=64,
                     )
                     output.save({"mdl": model_normal, "result": (G, d)})
 

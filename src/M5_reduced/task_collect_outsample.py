@@ -137,8 +137,7 @@ for idx, dist in enumerate(DISTS):
             for beta in BETAs:
                 m = f"QOpt($\\beta={beta}$)"
                 for alpha in ALPHAs:
-                    h_ = h // 7 * 7
-                    g, d = input_rf[alpha][beta][h_]["result"]
+                    g, d = input_rf[alpha][beta][h]["result"]
                     qopt_transforms[(m, alpha)] = (
                         S @ g,
                         (S @ d[:, 0])[None, :, None],
