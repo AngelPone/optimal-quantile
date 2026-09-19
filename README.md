@@ -1,12 +1,13 @@
 # Experiments for Paper "Optimal Forecast Reconciliation for Quantiles"
 
 
+
+
 ## Prepare the environment
 
-- Install uv
-```shell
-uv sync
-```
+- Clone the repository  `git clone --depth=1 https://github.com/AngelPone/optimal-quantile`
+- Install [uv](https://docs.astral.sh/uv/)
+- Initialize the Python environment by  `uv sync`
 
 
 ## Run the tasks
