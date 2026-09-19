@@ -40,7 +40,7 @@ def benchmarks(A, resids):
 
 
 for scenario in SCENARIOS:
-    seed = scenario_seed(scenario, offset=20_000)
+    seed = scenario_seed(scenario, offset=30_000)
     rf = [data_catalog[f"simulation_rf_{scenario}_{alpha}"] for alpha in ALPHAs]
 
     @task
@@ -53,12 +53,12 @@ for scenario in SCENARIOS:
     ):
         torch.manual_seed(seed)
         mean = torch.stack(
-            [window["mean"] for window in input_base[-TEST_WINDOWS:]],
+            [window["mean"] for window in input_base[:-TEST_WINDOWS]],
         )
         samples = torch.stack(
             [
                 window["dist"].sample(OUTPUT_SAMPLE_SIZE).permute((1, 0))
-                for window in input_base[-TEST_WINDOWS:]
+                for window in input_base[:-TEST_WINDOWS]
             ]
         )
         samples = mean[:, :, None] + samples
@@ -83,8 +83,8 @@ for scenario in SCENARIOS:
         y = torch.as_tensor(input_data["y"], dtype=A.dtype, device=A.device)
         true_y = expanding_window(y.shape[0], WINDOW_S, 1, y).collect_test().squeeze()
         weights = torch.diff(y, dim=0).abs().mean(dim=0)
-        true_y = true_y[-TEST_WINDOWS:, :]
-        assert true_y.shape == (TEST_WINDOWS, 9), f"dim {true_y.shape} is not correct"
+        true_y = true_y[:-TEST_WINDOWS, :]
+
         output_dict = {"method": [], "loss": [], "alpha": [], "window": [], "idx": []}
 
         for alpha in ALPHAs:
@@ -98,13 +98,4 @@ for scenario in SCENARIOS:
                         output_dict["window"].append(i)
                         output_dict["idx"].append(j)
         df = pd.DataFrame(output_dict)
-        df.to_csv(LOG_PATH / f"simulation_{scenario}.csv")
-
-
-if __name__ == "__main__":
-    rf = [data_catalog[f"simulation_rf_{scenario}_{alpha}"].load() for alpha in ALPHAs]
-    task_collect(
-        data_catalog[f"simulation_{scenario}"].load(),
-        data_catalog[f"simulation_base_{scenario}"].load(),
-        rf,
-    )
+        df.to_csv(LOG_PATH / f"simulation_{scenario}_insample.csv")

@@ -14,12 +14,9 @@ WINDOW_S = 52 * 7 * 2
 
 ALPHAs = [0.005, 0.025, 0.165, 0.25, 0.5, 0.75, 0.835, 0.975, 0.995]
 OUTPUT_SAMPLE_SIZE = 5000
-OUTSAMPLE_EVALUATION_BATCH_SIZE = 16
 BETAs = [100]
 data_catalog = DataCatalog(name="M5_reduced")
-M5_PATH = Path(
-    "/Users/bohan/Library/CloudStorage/Nextcloud-bohan@nc․bohan-zhang․com/Documents/datasets/m5-forecasting-accuracy",
-)
+M5_PATH = Path("/Path/to/M5/dataset")
 VERSION = 20260802
 LR = 1e-4
 SAMPLE_SIZE = {
@@ -32,9 +29,6 @@ DISTS = ["skew", "normal"]
 INIT = "shr"
 import torch
 
-if torch.backends.mps.is_available():
-    DEVICE = torch.device("mps")
-    DTYPE = torch.float32
-else:
-    DEVICE = torch.device("cpu")
-    DTYPE = torch.float64
+# Note that cpu can be extremely slow
+DEVICE = torch.device("mps")  # use cuda is cuda is available
+DTYPE = torch.float32

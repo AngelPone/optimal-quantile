@@ -13,8 +13,7 @@ from utils import SkewStudentT
 import torch
 from torch.distributions import Normal
 
-from pytask import task, Product
-from pathlib import Path
+from pytask import task
 from typing import Annotated, Any
 from forecopy import cstools, cscov
 import numpy as np
@@ -72,7 +71,7 @@ def benchmarks(samples, A, resids, alphas):
 
 
 for dist_idx, dist in enumerate(["normal", "skew"]):
-    seed = 20260803 + dist_idx
+    seed = 20260804 + dist_idx
 
     input_rf = {alpha: data_catalog[f"rf_{alpha}_{dist}"] for alpha in ALPHAs}
 
@@ -86,10 +85,8 @@ for dist_idx, dist in enumerate(["normal", "skew"]):
     ):
         torch.manual_seed(seed)
 
-        test_slice = slice(
-            input_base["mean"].shape[0] - TEST_WINDOWS, input_base["mean"].shape[0]
-        )
-        point_f = input_base["mean"][-TEST_WINDOWS:, :]
+        test_slice = slice(0, input_base["mean"].shape[0] - TEST_WINDOWS)
+        point_f = input_base["mean"][:-TEST_WINDOWS, :]
         loc, scale, xi, df = (
             input_base["dist"]["mean"],
             input_base["dist"]["std"],
@@ -149,4 +146,4 @@ for dist_idx, dist in enumerate(["normal", "skew"]):
                         output_df["window"].append(i)
                         output_df["idx"].append(j)
         output_df = pd.DataFrame(output_df)
-        output_df.to_csv(BLD / "logs" / f"tourism_{dist}.csv")
+        output_df.to_csv(BLD / "logs" / f"tourism_{dist}_insample.csv")

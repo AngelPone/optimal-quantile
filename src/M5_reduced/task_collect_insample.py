@@ -97,9 +97,9 @@ for idx, dist in enumerate(DISTS):
     @torch.no_grad()
     def task_collect(
         input_rf: Annotated[dict, rf],
-        input_data: Annotated[dict, data_catalog["test_data"]],
+        input_data: Annotated[dict, data_catalog["train_data"]],
         output_df: Annotated[Path, Product] = LOGGING_PATH
-        / f"M5_ets_{dist}_outsample.csv",
+        / f"M5_ets_{dist}_insample.csv",
         dist: str = dist,
         seed: int = seed,
     ):

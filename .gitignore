@@ -12,3 +12,16 @@ wheels/
 *.pkl
 
 .DS_Store
+output/logs
+*.pdf
+*.aux
+*.synctex.gz
+*.bbl
+*.log
+.vscode
+.Rproj.user
+pytask.lock
+
+.Rhistory
+
+

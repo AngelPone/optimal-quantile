@@ -15,6 +15,7 @@ dependencies = [
     "scipy>=1.17.1",
     "sstudentt>=0.1.1",
     "statsforecast>=2.0.1",
+    "tensorboard>=2.21.0",
     "torch>=2.12.0",
 ]
 
@@ -26,4 +27,4 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytask.ini_options]
-paths = [ "src/simulation", "src/tourism" ]
+paths = [ "src/simulation", "src/tourism", "src/M5_reduced"]
